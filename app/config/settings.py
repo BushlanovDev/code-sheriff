@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,13 +15,26 @@ class Settings(BaseSettings):
     )
 
     ci_project_id: str | None = None
-    ci_commit_sha: str | None = None
+    ci_merge_request_iid: str | None = None
+    ci_server_url: str | None = Field(default=None, description="GitLab CI server url")
 
     gitlab_api_key: SecretStr = Field(description="GitLab API Key")
     gitlab_base_url: str = Field(default="https://gitlab.com", description="GitLab base url")
 
     anthropic_api_key: SecretStr = Field(description="Anthropic API Key")
     anthropic_base_url: str | None = Field(default=None, description="Anthropic API base url")
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_gitlab_base_url_from_ci(cls, data: dict) -> dict:
+        """Resolve gitlab_base_url from CI_SERVER_URL if not set."""
+        if isinstance(data, dict):
+            # Only set if not already provided
+            if "gitlab_base_url" not in data or data["gitlab_base_url"] is None:
+                ci_server_url = data.get("ci_server_url")
+                if ci_server_url:
+                    data["gitlab_base_url"] = ci_server_url
+        return data
 
     @field_validator("gitlab_base_url", "anthropic_base_url")
     @classmethod

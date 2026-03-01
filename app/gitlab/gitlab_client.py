@@ -1,0 +1,70 @@
+from typing import Dict, Any, cast
+from urllib.parse import quote
+
+import requests
+
+
+class GitLabClient:
+    def __init__(self, base_url: str, token: str):
+        """
+        Initialize the GitLab API client.
+        :param base_url: The base URL of the GitLab instance.
+        :param token: The GitLab access token.
+        """
+        self.base_url: str = base_url
+        self.token: str = token
+        self.api_url: str = f"{self.base_url}/api/v4"
+
+        self.headers = {
+            "PRIVATE-TOKEN": self.token,
+            "Accept": "application/json",
+        }
+
+    def _get_project_id(self, project_id: str) -> str:
+        """URL encode the project ID if it's a project path (e.g. namespace/repo)."""
+        return quote(str(project_id), safe="")
+
+    def get_merge_request(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
+        """Fetch metadata for a specific Merge Request.
+
+        GET /api/v4/projects/{id}/merge_requests/{mr_iid}
+        """
+        url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+
+        return cast(Dict[str, Any], response.json())
+
+    def get_merge_request_changes(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
+        """Fetch the diff and SHA references for a specific MR.
+
+        Returns dict with 'changes' list and 'diff_refs' dict containing
+        base_sha, head_sha, start_sha needed for positioning discussions.
+
+        GET /api/v4/projects/{id}/merge_requests/{mr_iid}/changes
+        """
+        url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/changes"
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+
+        return cast(Dict[str, Any], response.json())
+
+    def format_mr_diff_to_unified(self, changes_data: Dict[str, Any]) -> str:
+        """Format GitLab MR changes diff into unified diff string for LLM.
+
+        Args:
+            changes_data: Response from get_merge_request_changes()
+
+        Returns:
+            Unified diff format string
+        """
+        diff_text = ""
+        for file in changes_data.get("changes", []):
+            old_path = file.get("old_path", "")
+            new_path = file.get("new_path", "")
+            diff = file.get("diff", "")
+
+            diff_text += f"--- a/{old_path}\n+++ b/{new_path}\n"
+            diff_text += f"{diff}\n\n"
+
+        return diff_text
