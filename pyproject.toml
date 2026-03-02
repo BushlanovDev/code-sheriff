@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "GitLab security review agent"
 requires-python = ">=3.13"
 dependencies = [
+    "claude-agent-sdk>=0.1.44",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "requests>=2.32.5",

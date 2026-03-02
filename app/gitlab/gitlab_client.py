@@ -1,7 +1,32 @@
+import time
+from functools import wraps
 from typing import Dict, Any, cast
 from urllib.parse import quote
 
 import requests
+
+
+def _retry_on_rate_limit(max_retries: int = 3, delay: int = 2):
+    """Decorator to retry on 429 rate limit responses."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429:
+                        wait_time = delay * (2**attempt)
+                        print(f"Rate limited, waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        raise
+            raise Exception("Max retries exceeded due to rate limiting")
+
+        return wrapper
+
+    return decorator
 
 
 class GitLabClient:
@@ -24,7 +49,8 @@ class GitLabClient:
         """URL encode the project ID if it's a project path (e.g. namespace/repo)."""
         return quote(str(project_id), safe="")
 
-    def get_merge_request(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
+    @_retry_on_rate_limit()
+    def get_merge_request_data(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
         """Fetch metadata for a specific Merge Request.
 
         GET /api/v4/projects/{id}/merge_requests/{mr_iid}
@@ -35,6 +61,7 @@ class GitLabClient:
 
         return cast(Dict[str, Any], response.json())
 
+    @_retry_on_rate_limit()
     def get_merge_request_changes(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
         """Fetch the diff and SHA references for a specific MR.
 
@@ -49,8 +76,8 @@ class GitLabClient:
 
         return cast(Dict[str, Any], response.json())
 
-    def format_mr_diff_to_unified(self, changes_data: Dict[str, Any]) -> str:
-        """Format GitLab MR changes diff into unified diff string for LLM.
+    def format_mr_diff(self, changes_data: Dict[str, Any]) -> str:
+        """Format GitLab MR changes diff into unified diff string.
 
         Args:
             changes_data: Response from get_merge_request_changes()
@@ -64,6 +91,7 @@ class GitLabClient:
             new_path = file.get("new_path", "")
             diff = file.get("diff", "")
 
+            diff_text += f"diff --git a/{old_path} b/{new_path}\n"
             diff_text += f"--- a/{old_path}\n+++ b/{new_path}\n"
             diff_text += f"{diff}\n\n"
 

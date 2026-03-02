@@ -11,6 +11,7 @@ class ExitCode(IntEnum):
     - 1: General errors
     - 2: Misconfiguration/invalid input
     """
+
     SUCCESS = 0
     GENERAL_ERROR = 1
     CONFIGURATION_ERROR = 2

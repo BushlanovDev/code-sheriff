@@ -14,15 +14,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    ci_server_url: str | None = Field(default=None, description="GitLab CI server url")
     ci_project_id: str | None = None
     ci_merge_request_iid: str | None = None
-    ci_server_url: str | None = Field(default=None, description="GitLab CI server url")
+    ci_project_dir: str | None = None
 
     gitlab_api_key: SecretStr = Field(description="GitLab API Key")
     gitlab_base_url: str = Field(default="https://gitlab.com", description="GitLab base url")
 
     anthropic_api_key: SecretStr = Field(description="Anthropic API Key")
     anthropic_base_url: str | None = Field(default=None, description="Anthropic API base url")
+    claude_model: str = Field(description="Default claude model to use")
 
     @model_validator(mode="before")
     @classmethod
