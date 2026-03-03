@@ -1,16 +1,30 @@
 import asyncio
 import sys
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, List, Any, Dict
 
-from claude_agent_sdk import ClaudeAgentOptions, query
-from claude_agent_sdk.types import SystemPromptPreset
-from pydantic import ValidationError
+from claude_agent_sdk import AssistantMessage, ResultMessage
+from pydantic import BaseModel, ValidationError
+
+from app.claude import get_claude_code_agent
 
 from app import get_mr_review_prompt
 from app.config import get_settings, Settings
 from app.constants import ExitCode
 from app.gitlab import GitLabClient
+
+
+class AnalysisSummary(BaseModel):
+    files_reviewed: int
+    high_severity: int
+    medium_severity: int
+    low_severity: int
+    review_completed: bool
+
+
+class SecurityReviewOutput(BaseModel):
+    findings: List[Any]
+    analysis_summary: AnalysisSummary
 
 
 def _get_settings() -> Settings:
@@ -43,6 +57,29 @@ def _merge_request_info(settings: Settings) -> Tuple[str, int]:
             sys.exit(ExitCode.CONFIGURATION_ERROR)
 
     return project_id, int(mr_iid)
+
+
+def _get_block_input_dict(block: Any) -> Dict[str, Any]:
+    input_data = getattr(block, "input", {}) or {}
+    if isinstance(input_data, dict):
+        return input_data
+    return getattr(input_data, "__dict__", {}) or {}
+
+
+def _get_tool_summary(name: str, block_input: Dict[str, Any]) -> str:
+    match name:
+        case "Bash":
+            return str(block_input.get("command", "command"))
+        case "Read":
+            return str(block_input.get("file_path", "file"))
+        case "Glob":
+            return str(block_input.get("pattern", "pattern"))
+        case "Grep":
+            pattern = block_input.get("pattern", "pattern")
+            path = block_input.get("path", ".")
+            return f'"{pattern}" in {path}'
+        case _:
+            return ""
 
 
 async def main() -> None:
@@ -87,68 +124,48 @@ async def main() -> None:
 
     #################################################################################
 
-    review_schema = {
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "file": {"type": "string"},
-                        "line": {"type": "number"},
-                        "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
-                        "category": {"type": "string"},
-                        "description": {"type": "string"},
-                        "exploit_scenario": {"type": "string"},
-                        "recommendation": {"type": "string"},
-                        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                    },
-                    "required": [
-                        "file",
-                        "line",
-                        "severity",
-                        "category",
-                        "description",
-                        "exploit_scenario",
-                        "recommendation",
-                        "confidence",
-                    ],
-                },
-            },
-            "analysis_summary": {
-                "type": "object",
-                "properties": {
-                    "files_reviewed": {"type": "number"},
-                    "high_severity": {"type": "number"},
-                    "medium_severity": {"type": "number"},
-                    "low_severity": {"type": "number"},
-                    "review_completed": {"type": "boolean"},
-                },
-                "required": ["files_reviewed", "high_severity", "medium_severity", "low_severity", "review_completed"],
-            },
-        },
-        "required": ["findings", "analysis_summary"],
-    }
+    claude_code_agent = get_claude_code_agent(settings, repo_dir)
+    final_output: SecurityReviewOutput | None = None
 
-    options = ClaudeAgentOptions(
-        model=settings.claude_model,
-        setting_sources=["project"],
-        allowed_tools=["Read", "Glob", "Grep", "Bash", "StructuredOutput"],
-        disallowed_tools=["Write", "Edit", "WebSearch", "WebFetch", "AskUserQuestion"],
-        permission_mode="bypassPermissions",
-        max_turns=100,
-        cwd=repo_dir,
-        system_prompt=SystemPromptPreset(type="preset", preset="claude_code"),
-        output_format={
-            "type": "json_schema",
-            "schema": review_schema,
-        },
-    )
+    async with claude_code_agent:
+        await claude_code_agent.query(prompt)
 
-    async for message in query(prompt=prompt, options=options):
-        print(message)
-        print("#################################################################################")
+        async for message in claude_code_agent.receive_response():
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if hasattr(block, "name"):
+                        block_input = _get_block_input_dict(block)
+
+                        if block.name == "Task":
+                            print(f"🤖 Delegating to: {block_input.get('subagent_type', 'unknown')}")
+                        else:
+                            print(f"📂 {block.name}: {_get_tool_summary(block.name, block_input)}")
+
+            elif isinstance(message, ResultMessage):
+                print(message)
+                if message.subtype == "success" and message.structured_output is not None:
+                    try:
+                        final_output = SecurityReviewOutput.model_validate(message.structured_output)
+                    except ValidationError as e:
+                        print(f"Failed to parse structured output: {e}")
+
+                    cost = getattr(message, "total_cost_usd", 0.0)
+                    duration = getattr(message, "duration_ms", 0) / 1000
+                    usage = getattr(message, "usage", {})
+                    input_tokens = usage.get("input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+
+                    print(f"\n✅ Review complete!")
+                    print(f"Cost: ${cost:.4f}")
+                    print(f"Duration: {duration:.4f}")
+                    print(f"Input tokens: {input_tokens}")
+                    print(f"Output tokens: {output_tokens}")
+                else:
+                    print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
+
+    if final_output:
+        print("\n--- Parsed Security Review Output ---")
+        print(final_output.model_dump_json(indent=2))
 
     #################################################################################
 

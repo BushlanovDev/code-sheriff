@@ -120,7 +120,7 @@ You MUST output your findings as structured JSON with this exact schema:
       "description": "User input passed to SQL query without parameterization",
       "exploit_scenario": "Attacker could extract database contents by manipulating the 'search' parameter with SQL injection payloads like '1; DROP TABLE users--'",
       "recommendation": "Replace string formatting with parameterized queries using SQLAlchemy or equivalent",
-      "confidence": 0.95
+      "confidence": 0.9
     }}
   ],
   "analysis_summary": {{
