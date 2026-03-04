@@ -50,7 +50,7 @@ class GitLabClient:
         return quote(str(project_id), safe="")
 
     @_retry_on_rate_limit()
-    def get_merge_request_data(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
+    def get_merge_request(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
         """Fetch metadata for a specific Merge Request.
 
         GET /api/v4/projects/{id}/merge_requests/{mr_iid}
@@ -76,7 +76,7 @@ class GitLabClient:
 
         return cast(Dict[str, Any], response.json())
 
-    def format_mr_diff(self, changes_data: Dict[str, Any]) -> str:
+    def format_merge_request_diff(self, changes_data: Dict[str, Any]) -> str:
         """Format GitLab MR changes diff into unified diff string.
 
         Args:
@@ -96,3 +96,28 @@ class GitLabClient:
             diff_text += f"{diff}\n\n"
 
         return diff_text
+
+    @_retry_on_rate_limit()
+    def create_merge_request_discussion(
+        self, project_id: str, mr_iid: int, position: Dict[str, Any], body: str
+    ) -> Dict[str, Any]:
+        """Create an inline discussion on a specific line.
+
+        POST /api/v4/projects/{id}/merge_requests/{mr_iid}/discussions
+
+        Args:
+            project_id: Project ID or path
+            mr_iid: Merge Request IID
+            position: Dict with base_sha, head_sha, start_sha, old_path, new_path,
+                      position_type, and new_line
+            body: Discussion body text (markdown)
+        """
+        url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/discussions"
+        payload = {
+            "body": body,
+            "position": position,
+        }
+        response = requests.post(url, headers=self.headers, json=payload)
+        response.raise_for_status()
+
+        return cast(Dict[str, Any], response.json())

@@ -1,30 +1,17 @@
 import asyncio
 import sys
 from pathlib import Path
-from typing import Tuple, List, Any, Dict
+from typing import Tuple, Any, Dict
 
 from claude_agent_sdk import AssistantMessage, ResultMessage
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from app.claude import get_claude_code_agent
+from app.claude import get_claude_code_agent, SecurityReviewOutput
 
 from app import get_mr_review_prompt
 from app.config import get_settings, Settings
 from app.constants import ExitCode
 from app.gitlab import GitLabClient
-
-
-class AnalysisSummary(BaseModel):
-    files_reviewed: int
-    high_severity: int
-    medium_severity: int
-    low_severity: int
-    review_completed: bool
-
-
-class SecurityReviewOutput(BaseModel):
-    findings: List[Any]
-    analysis_summary: AnalysisSummary
 
 
 def _get_settings() -> Settings:
@@ -79,7 +66,7 @@ def _get_tool_summary(name: str, block_input: Dict[str, Any]) -> str:
             path = block_input.get("path", ".")
             return f'"{pattern}" in {path}'
         case _:
-            return ""
+            return "..."
 
 
 async def main() -> None:
@@ -101,19 +88,21 @@ async def main() -> None:
         token=settings.gitlab_api_key.get_secret_value(),
     )
 
-    mr_data = gitlab_client.get_merge_request_data(project_id, mr_iid)
+    print("Getting merge request info...")
+    mr_data = gitlab_client.get_merge_request(project_id, mr_iid)
     # Check if MR is already merged or closed
     if mr_data.get("state") in ["merged", "closed"]:
         print(f"MR is {mr_data.get('state')}, skipping review")
         sys.exit(ExitCode.SUCCESS)
 
+    print("Getting merge request changes...")
     mr_changes = gitlab_client.get_merge_request_changes(project_id, mr_iid)
     # Check for empty diff
     if not mr_changes.get("changes"):
         print("No changes detected in MR")
         sys.exit(ExitCode.SUCCESS)
 
-    mr_diff = gitlab_client.format_mr_diff(mr_changes)
+    mr_diff = gitlab_client.format_merge_request_diff(mr_changes)
     # Generate security audit prompt
     prompt = get_mr_review_prompt(mr_data, mr_diff)
 
@@ -127,45 +116,52 @@ async def main() -> None:
     claude_code_agent = get_claude_code_agent(settings, repo_dir)
     final_output: SecurityReviewOutput | None = None
 
-    async with claude_code_agent:
-        await claude_code_agent.query(prompt)
+    try:
+        async with claude_code_agent:
+            await claude_code_agent.query(prompt)
 
-        async for message in claude_code_agent.receive_response():
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if hasattr(block, "name"):
-                        block_input = _get_block_input_dict(block)
+            async for message in claude_code_agent.receive_response():
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if hasattr(block, "name"):
+                            block_input = _get_block_input_dict(block)
 
-                        if block.name == "Task":
-                            print(f"🤖 Delegating to: {block_input.get('subagent_type', 'unknown')}")
-                        else:
-                            print(f"📂 {block.name}: {_get_tool_summary(block.name, block_input)}")
+                            if block.name == "Task":
+                                print(f"🤖 Delegating to: {block_input.get('subagent_type', 'unknown')}")
+                            else:
+                                print(f"📂 {block.name}: {_get_tool_summary(block.name, block_input)}")
 
-            elif isinstance(message, ResultMessage):
-                print(message)
-                if message.subtype == "success" and message.structured_output is not None:
-                    try:
-                        final_output = SecurityReviewOutput.model_validate(message.structured_output)
-                    except ValidationError as e:
-                        print(f"Failed to parse structured output: {e}")
+                elif isinstance(message, ResultMessage):
+                    if message.subtype == "success" and message.structured_output is not None:
+                        try:
+                            final_output = SecurityReviewOutput.model_validate(message.structured_output)
+                        except ValidationError as e:
+                            print(f"Failed to parse structured output: {e}")
 
-                    cost = getattr(message, "total_cost_usd", 0.0)
-                    duration = getattr(message, "duration_ms", 0) / 1000
-                    usage = getattr(message, "usage", {})
-                    input_tokens = usage.get("input_tokens", 0)
-                    output_tokens = usage.get("output_tokens", 0)
+                        cost = getattr(message, "total_cost_usd", 0.0)
+                        duration = getattr(message, "duration_api_ms", 0) / 1000
+                        usage = getattr(message, "usage", {})
+                        input_tokens = usage.get("input_tokens", 0)
+                        output_tokens = usage.get("output_tokens", 0)
 
-                    print(f"\n✅ Review complete!")
-                    print(f"Cost: ${cost:.4f}")
-                    print(f"Duration: {duration:.4f}")
-                    print(f"Input tokens: {input_tokens}")
-                    print(f"Output tokens: {output_tokens}")
-                else:
-                    print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
+                        print(f"\n✅ Review complete!")
+                        print(f"Cost: ${cost:.4f}")
+                        print(f"Duration: {duration:.4f}")
+                        print(f"Input tokens: {input_tokens}")
+                        print(f"Output tokens: {output_tokens}")
+                        print(f"Tokens per second: {output_tokens / duration:.2f}")
+                    else:
+                        print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
+                        sys.exit(ExitCode.GENERAL_ERROR)
+    except Exception as e:
+        print(f"❌ Claude code agent error: {e}")
+        sys.exit(ExitCode.GENERAL_ERROR)
 
-    if final_output:
-        print("\n--- Parsed Security Review Output ---")
-        print(final_output.model_dump_json(indent=2))
+    if not final_output:
+        print("\n❌ Failed to get a structured review result from the agent.")
+        sys.exit(ExitCode.GENERAL_ERROR)
+
+    original_issue_count = len(final_output.findings)
 
     #################################################################################
 

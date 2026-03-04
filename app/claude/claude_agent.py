@@ -1,8 +1,24 @@
 from pathlib import Path
+from typing import List, Any
+
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import SystemPromptPreset
+from pydantic import BaseModel
 
 from app.config import Settings
+
+
+class AnalysisSummary(BaseModel):
+    files_reviewed: int
+    high_severity: int
+    medium_severity: int
+    low_severity: int
+    review_completed: bool
+
+
+class SecurityReviewOutput(BaseModel):
+    findings: List[Any]
+    analysis_summary: AnalysisSummary
 
 
 def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient:
@@ -54,9 +70,9 @@ def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient
         model=settings.claude_model,
         setting_sources=["project"],
         allowed_tools=["Read", "Glob", "Grep", "Bash", "StructuredOutput"],
-        disallowed_tools=["Write", "Edit", "WebSearch", "WebFetch", "AskUserQuestion"],
+        disallowed_tools=["Write", "Edit", "WebSearch", "WebFetch", "AskUserQuestion", "TodoWrite"],
         permission_mode="bypassPermissions",
-        max_turns=100,
+        max_turns=50,
         cwd=repo_dir,
         system_prompt=SystemPromptPreset(type="preset", preset="claude_code"),
         output_format={
