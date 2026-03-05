@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from typing import Tuple, Any, Dict
 
+import requests
 from claude_agent_sdk import AssistantMessage, ResultMessage
 from pydantic import ValidationError
 
@@ -163,10 +164,43 @@ async def main() -> None:
 
     original_issue_count = len(final_output.findings)
 
+    for finding in final_output.findings:
+        # Format issue as markdown
+        severity_icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(finding.severity, "⚪")
+
+        severity = finding.severity
+        category = finding.category
+        description = finding.description
+
+        issue_body = f"### {severity_icon} {severity}: {category}\n\n"
+        issue_body += f"{description}\n\n"
+
+        position = gitlab_client.build_position_for_issue(mr_changes, finding)
+        if position:
+            # Create inline discussion
+            try:
+                gitlab_client.create_merge_request_discussion(project_id, mr_iid, position, issue_body)
+                # discussions_created += 1
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 400:
+                    # Invalid position, fall back to summary
+                    print(f"Warning: Invalid position for {finding.file}:{finding.line}")
+                    # orphan_finding.append(finding)
+                else:
+                    raise
+        else:
+            # No position found, add to orphans
+            print(f"[Warning] Could not find position for {finding.file}:{finding.line}")
+            # orphan_finding.append(finding)
+
     #################################################################################
 
     sys.exit(ExitCode.SUCCESS)
 
 
-if __name__ == "__main__":
+def cli_main() -> None:
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli_main()

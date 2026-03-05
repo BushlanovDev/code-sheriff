@@ -1,11 +1,22 @@
 from pathlib import Path
-from typing import List, Any
+from typing import List, Literal
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import SystemPromptPreset
 from pydantic import BaseModel
 
 from app.config import Settings
+
+
+class Finding(BaseModel):
+    file: str
+    line: int
+    severity: Literal["LOW", "MEDIUM", "HIGH"]
+    category: str
+    description: str
+    exploit_scenario: str
+    recommendation: str
+    confidence: float
 
 
 class AnalysisSummary(BaseModel):
@@ -17,7 +28,7 @@ class AnalysisSummary(BaseModel):
 
 
 class SecurityReviewOutput(BaseModel):
-    findings: List[Any]
+    findings: List[Finding]
     analysis_summary: AnalysisSummary
 
 

@@ -1,9 +1,12 @@
 import time
+import re
 from functools import wraps
 from typing import Dict, Any, cast
 from urllib.parse import quote
 
 import requests
+
+from app.claude import Finding
 
 
 def _retry_on_rate_limit(max_retries: int = 3, delay: int = 2):
@@ -48,6 +51,53 @@ class GitLabClient:
     def _get_project_id(self, project_id: str) -> str:
         """URL encode the project ID if it's a project path (e.g. namespace/repo)."""
         return quote(str(project_id), safe="")
+
+    def _parse_diff_position(
+        self, diff: str, target_line: int, old_path: str, new_path: str, base_sha: str, head_sha: str, start_sha: str
+    ) -> Dict[str, Any] | None:
+        """Parse diff to find position dict for a target line number.
+
+        Args:
+            diff: Unified diff text
+            target_line: Line number in NEW version to find
+            old_path: Old file path
+            new_path: New file path
+            base_sha, head_sha, start_sha: SHAs from diff_refs
+
+        Returns:
+            Position dict for GitLab API or None if line not found
+        """
+
+        lines = diff.split("\n")
+        current_new_line = None
+
+        for line in lines:
+            # Match hunk header: @@ -old_start,old_count +new_start,new_count @@
+            hunk_match = re.match(r"@@\s+-(\d+),?\d*\s+\+(\d+),?\d*\s+@@", line)
+            if hunk_match:
+                current_new_line = int(hunk_match.group(2))
+                continue
+
+            if current_new_line is not None:
+                if line.startswith("+") and not line.startswith("++"):
+                    # This is an added line in new version
+                    if current_new_line == target_line:
+                        # Found our target line!
+                        return {
+                            "base_sha": base_sha,
+                            "head_sha": head_sha,
+                            "start_sha": start_sha,
+                            "old_path": old_path,
+                            "new_path": new_path,
+                            "position_type": "text",
+                            "new_line": target_line,
+                        }
+                    current_new_line += 1
+                elif not line.startswith("-"):
+                    # Context line - also counts
+                    current_new_line += 1
+
+        return None
 
     @_retry_on_rate_limit()
     def get_merge_request(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
@@ -121,3 +171,42 @@ class GitLabClient:
         response.raise_for_status()
 
         return cast(Dict[str, Any], response.json())
+
+    def build_position_for_issue(self, changes_data: Dict[str, Any], finding: Finding) -> Dict[str, Any] | None:
+        """Build GitLab discussion position for a security issue.
+
+        Args:
+            changes_data: Response from get_merge_request_changes()
+            finding: Finding dict with 'file' and 'line' keys
+
+        Returns:
+            Position dict for GitLab API, or None if position cannot be determined
+        """
+        diff_refs = changes_data.get("diff_refs", {})
+        base_sha = diff_refs.get("base_sha")
+        head_sha = diff_refs.get("head_sha")
+        start_sha = diff_refs.get("start_sha")
+
+        target_file = finding.file
+        target_line = finding.line
+
+        if not target_file or not target_line:
+            return None
+
+        # Find the file in changes
+        for change in changes_data.get("changes", []):
+            if change.get("new_path") == target_file:
+                # Parse diff to find position
+                position = self._parse_diff_position(
+                    change.get("diff", ""),
+                    target_line,
+                    change.get("old_path"),
+                    change.get("new_path"),
+                    base_sha,
+                    head_sha,
+                    start_sha,
+                )
+                if position:
+                    return position
+
+        return None

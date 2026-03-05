@@ -1,7 +1,7 @@
 [project]
 name = "gitlab-security-review-agent"
 version = "0.1.0"
-description = "GitLab security review agent"
+description = "Code review agent"
 requires-python = ">=3.13"
 dependencies = [
     "claude-agent-sdk>=0.1.44",
@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-gitlab-security-review-agent = "app.main:main"
+review-agent = "app.main:cli_main"
 
 [dependency-groups]
 dev = [
