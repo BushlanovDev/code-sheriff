@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Tuple, Any, Dict
 
@@ -68,6 +69,57 @@ def _get_tool_summary(name: str, block_input: Dict[str, Any]) -> str:
             return f'"{pattern}" in {path}'
         case _:
             return "..."
+
+
+def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: Dict | None = None) -> str:
+    """Format the JSON review result into a nice GitLab Markdown string."""
+    # score = result.get('overallScore', 0)
+    # summary = result.get('summary', 'No summary provided.')
+    findings = result.findings
+    analysis_summary = result.analysis_summary
+
+    md = "## 🤖 Code Review"
+
+    # Add MR reference if available
+    if mr_data:
+        mr_iid = mr_data.get("iid", "?")
+        md += f": !{mr_iid}\n\n"
+        md += f"**Branch:** `{mr_data.get('source_branch', '?')}` → `{mr_data.get('target_branch', '?')}`\n"
+        md += f"**Author:** {mr_data.get('author', {}).get('name', 'Unknown')}\n"
+    else:
+        md += "\n"
+
+    md += f"**Files reviewed:** {analysis_summary.files_reviewed}\n\n"
+
+    if not findings:
+        md += "### ✅ No notable security or code quality issues found.\n"
+        return md
+
+    md += f"### 📊 Issues Found ({len(findings)})\n\n"
+
+    categorized_findings: Dict[str, list] = defaultdict(list)
+    for finding in findings:
+        categorized_findings[str(finding.severity)].append(finding)
+
+    # Print in order of severity
+    for severity in ["HIGH", "MEDIUM", "LOW"]:
+        cat_findings = categorized_findings[severity]
+        if not cat_findings:
+            continue
+
+        icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(severity, "⚪")
+
+        md += f"#### {icon}  {severity} ({len(cat_findings)})\n"
+
+        for finding in cat_findings:
+            location = f"`{finding.file}:{finding.line}`" if finding.line else f"`{finding.file}`"
+
+            md += f"- **[{finding.category}]** {location}: {finding.description}\n"
+            md += f"  - *Exploit scenario:* {finding.exploit_scenario}\n"
+            md += f"  - *Recommendation:* {finding.recommendation}\n"
+        md += "\n"
+
+    return md
 
 
 async def main() -> None:
@@ -162,39 +214,55 @@ async def main() -> None:
         print("\n❌ Failed to get a structured review result from the agent.")
         sys.exit(ExitCode.GENERAL_ERROR)
 
-    original_issue_count = len(final_output.findings)
+    markdown_report = _format_review_to_markdown(final_output, mr_data)
+    print("\n\n------ REVIEW REPORT ------\n")
+    print(markdown_report)
+    print("---------------------------\n")
+
+    print("Posting comments to GitLab MR...")
+    gitlab_client.create_merge_request_note(project_id, mr_iid, markdown_report)
+    print("Summary posted successfully!")
+
+    # Post inline discussions for each findings
+    discussions_created = 0
 
     for finding in final_output.findings:
         # Format issue as markdown
         severity_icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(finding.severity, "⚪")
 
-        severity = finding.severity
-        category = finding.category
-        description = finding.description
-
-        issue_body = f"### {severity_icon} {severity}: {category}\n\n"
-        issue_body += f"{description}\n\n"
+        issue_body = f"### {severity_icon} {finding.severity}: {finding.category}\n\n"
+        issue_body += f"{finding.description}\n\n"
+        issue_body += f"{finding.exploit_scenario}\n\n"
+        issue_body += f"{finding.recommendation}\n\n"
 
         position = gitlab_client.build_position_for_issue(mr_changes, finding)
         if position:
             # Create inline discussion
             try:
                 gitlab_client.create_merge_request_discussion(project_id, mr_iid, position, issue_body)
-                # discussions_created += 1
+                discussions_created += 1
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 400:
                     # Invalid position, fall back to summary
-                    print(f"Warning: Invalid position for {finding.file}:{finding.line}")
-                    # orphan_finding.append(finding)
+                    print(f"[Warning] Invalid position for {finding.file}:{finding.line}")
+                    # orphan_findings.append(finding)
                 else:
                     raise
         else:
             # No position found, add to orphans
             print(f"[Warning] Could not find position for {finding.file}:{finding.line}")
-            # orphan_finding.append(finding)
+            # orphan_findings.append(finding)
+
+    print(f"Created {discussions_created} inline discussions")
+
+    high_sev_count = sum(1 for i in final_output.findings if i.severity in ["HIGH"])
+    if high_sev_count > 0:
+        print(f"Analysis failed: Found {high_sev_count} HIGH/MEDIUM issues. Rejecting MR.")
+        sys.exit(ExitCode.GENERAL_ERROR)
 
     #################################################################################
 
+    print("Code is clean. Success!")
     sys.exit(ExitCode.SUCCESS)
 
 

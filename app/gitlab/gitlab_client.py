@@ -172,6 +172,19 @@ class GitLabClient:
 
         return cast(Dict[str, Any], response.json())
 
+    @_retry_on_rate_limit()
+    def create_merge_request_note(self, project_id: str, mr_iid: int, body: str) -> Dict[str, Any]:
+        """Create a general note/comment on a Merge Request.
+
+        POST /api/v4/projects/{id}/merge_requests/{mr_iid}/notes
+        """
+        url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/notes"
+        payload = {"body": body}
+        response = requests.post(url, headers=self.headers, json=payload)
+        response.raise_for_status()
+
+        return cast(Dict[str, Any], response.json())
+
     def build_position_for_issue(self, changes_data: Dict[str, Any], finding: Finding) -> Dict[str, Any] | None:
         """Build GitLab discussion position for a security issue.
 
