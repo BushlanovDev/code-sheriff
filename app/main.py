@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Tuple, Any, Dict
 
 import requests
-from claude_agent_sdk import AssistantMessage, ResultMessage
+from claude_agent_sdk import AssistantMessage, ResultMessage, ClaudeSDKClient
 from pydantic import ValidationError
 
 from app.claude import get_claude_code_agent, SecurityReviewOutput
 
-from app import get_mr_review_prompt
+from app import get_security_audit_prompt
 from app.config import get_settings, Settings
 from app.constants import ExitCode
 from app.gitlab import GitLabClient
@@ -31,7 +31,7 @@ def _get_settings() -> Settings:
     return settings
 
 
-def _merge_request_info(settings: Settings) -> Tuple[str, int]:
+def _merge_request_param(settings: Settings) -> Tuple[str, int]:
     """Get project and merge request from GitLab environment or args"""
     project_id = settings.ci_project_id
     mr_iid = settings.ci_merge_request_iid
@@ -122,11 +122,52 @@ def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: Dict | Non
     return md
 
 
+async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -> SecurityReviewOutput | None:
+    final_output: SecurityReviewOutput | None = None
+    async with claude_code_agent:
+        await claude_code_agent.query(prompt)
+
+        async for message in claude_code_agent.receive_response():
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if hasattr(block, "name"):
+                        block_input = _get_block_input_dict(block)
+                        if block.name == "Task":
+                            print(f"🤖 Delegating to: {block_input.get('subagent_type', 'unknown')}")
+                        else:
+                            print(f"📂 {block.name}: {_get_tool_summary(block.name, block_input)}")
+
+            elif isinstance(message, ResultMessage):
+                if message.subtype == "success" and message.structured_output is not None:
+                    try:
+                        final_output = SecurityReviewOutput.model_validate(message.structured_output)
+                    except ValidationError as e:
+                        print(f"Failed to parse structured output: {e}")
+
+                    cost = getattr(message, "total_cost_usd", 0.0)
+                    duration = getattr(message, "duration_api_ms", 0) / 1000
+                    usage = getattr(message, "usage", {})
+                    input_tokens = usage.get("input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+
+                    print(f"\n✅ Review complete!")
+                    print(f"Cost: ${cost:.4f}")
+                    print(f"Duration: {duration:.4f}")
+                    print(f"Input tokens: {input_tokens}")
+                    print(f"Output tokens: {output_tokens}")
+                    print(f"Tokens per second: {output_tokens / duration:.2f}")
+                else:
+                    print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
+                    sys.exit(ExitCode.GENERAL_ERROR)
+
+    return final_output
+
+
 async def main() -> None:
     """Main execution function for GitHub Action."""
     settings = _get_settings()
     # Get project and merge request from GitLab environment or args
-    project_id, mr_iid = _merge_request_info(settings)
+    project_id, mr_iid = _merge_request_param(settings)
 
     # Get repo directory from environment or use current directory
     repo_dir = Path(settings.ci_project_dir) if settings.ci_project_dir else Path.cwd()
@@ -142,14 +183,24 @@ async def main() -> None:
     )
 
     print("Getting merge request info...")
-    mr_data = gitlab_client.get_merge_request(project_id, mr_iid)
+    try:
+        mr_data = gitlab_client.get_merge_request(project_id, mr_iid)
+    except Exception as e:
+        print(f"Failed to fetch MR data: {str(e)}")
+        sys.exit(ExitCode.GENERAL_ERROR)
+
     # Check if MR is already merged or closed
     if mr_data.get("state") in ["merged", "closed"]:
         print(f"MR is {mr_data.get('state')}, skipping review")
         sys.exit(ExitCode.SUCCESS)
 
     print("Getting merge request changes...")
-    mr_changes = gitlab_client.get_merge_request_changes(project_id, mr_iid)
+    try:
+        mr_changes = gitlab_client.get_merge_request_changes(project_id, mr_iid)
+    except Exception as e:
+        print(f"Failed to fetch MR changes: {str(e)}")
+        sys.exit(ExitCode.GENERAL_ERROR)
+
     # Check for empty diff
     if not mr_changes.get("changes"):
         print("No changes detected in MR")
@@ -157,55 +208,18 @@ async def main() -> None:
 
     mr_diff = gitlab_client.format_merge_request_diff(mr_changes)
     # Generate security audit prompt
-    prompt = get_mr_review_prompt(mr_data, mr_diff)
+    prompt = get_security_audit_prompt(mr_data, mr_diff)
 
     # Check prompt size
     prompt_size = len(prompt.encode("utf-8"))
     if prompt_size > 1024 * 1024:  # 1MB
         print(f"[Warning] Large prompt size: {prompt_size / 1024 / 1024:.2f}MB")
 
-    #################################################################################
-
-    claude_code_agent = get_claude_code_agent(settings, repo_dir)
+    print(f"🤖 Run Claude Code security audit")
     final_output: SecurityReviewOutput | None = None
-
     try:
-        async with claude_code_agent:
-            await claude_code_agent.query(prompt)
-
-            async for message in claude_code_agent.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if hasattr(block, "name"):
-                            block_input = _get_block_input_dict(block)
-
-                            if block.name == "Task":
-                                print(f"🤖 Delegating to: {block_input.get('subagent_type', 'unknown')}")
-                            else:
-                                print(f"📂 {block.name}: {_get_tool_summary(block.name, block_input)}")
-
-                elif isinstance(message, ResultMessage):
-                    if message.subtype == "success" and message.structured_output is not None:
-                        try:
-                            final_output = SecurityReviewOutput.model_validate(message.structured_output)
-                        except ValidationError as e:
-                            print(f"Failed to parse structured output: {e}")
-
-                        cost = getattr(message, "total_cost_usd", 0.0)
-                        duration = getattr(message, "duration_api_ms", 0) / 1000
-                        usage = getattr(message, "usage", {})
-                        input_tokens = usage.get("input_tokens", 0)
-                        output_tokens = usage.get("output_tokens", 0)
-
-                        print(f"\n✅ Review complete!")
-                        print(f"Cost: ${cost:.4f}")
-                        print(f"Duration: {duration:.4f}")
-                        print(f"Input tokens: {input_tokens}")
-                        print(f"Output tokens: {output_tokens}")
-                        print(f"Tokens per second: {output_tokens / duration:.2f}")
-                    else:
-                        print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
-                        sys.exit(ExitCode.GENERAL_ERROR)
+        claude_code_agent = get_claude_code_agent(settings, repo_dir)
+        final_output = await _run_security_audit(claude_code_agent, prompt)
     except Exception as e:
         print(f"❌ Claude code agent error: {e}")
         sys.exit(ExitCode.GENERAL_ERROR)

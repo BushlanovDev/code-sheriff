@@ -3,7 +3,7 @@
 from typing import Dict, Any
 
 
-def get_mr_review_prompt(mr_data: Dict[str, Any], diff_text: str) -> str:
+def get_security_audit_prompt(mr_data: Dict[str, Any], diff_text: str) -> str:
     """Generate security and code review prompt for Merge Request analysis.
 
     Args:
@@ -40,11 +40,12 @@ CRITICAL INSTRUCTIONS:
 1. MINIMIZE FALSE POSITIVES: Only flag issues where you're >80% confident of actual exploitability
 2. AVOID NOISE: Skip theoretical issues, style concerns, or low-impact findings
 3. FOCUS ON IMPACT: Prioritize vulnerabilities that could lead to unauthorized access, data breaches, or system compromise
-4. EXCLUSIONS: Do NOT report the following issue types:
+4. DO NOT IMAGINATE PROBLEMS THAT DO NOT EXIST: study only real changes in new code and their impact on the security of the project.
+5. EXCLUSIONS: Do NOT report the following issue types:
    - Denial of Service (DOS) vulnerabilities, even if they allow service disruption
    - Secrets or sensitive data stored on disk (these are handled by other processes)
    - Rate limiting or resource exhaustion issues
-5. EXPLORE CONTEXT: If the provided diff text is not clear enough, use your available tools (Glob, Read, Grep, Bash) to explore the surrounding codebase to understand how this modified code integrates with the rest of the application.
+6. EXPLORE CONTEXT: If the provided diff text is not clear enough, use your available tools (Glob, Read, Grep, Bash) to explore the surrounding codebase to understand how this modified code integrates with the rest of the application.
 
 SECURITY CATEGORIES TO EXAMINE:
 
