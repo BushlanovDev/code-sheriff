@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from app.claude import get_claude_code_agent, SecurityReviewOutput
 
-from app import get_security_audit_prompt
+from app import get_security_audit_prompt, FindingsFilter
 from app.config import get_settings, Settings
 from app.constants import ExitCode
 from app.gitlab import GitLabClient
@@ -176,6 +176,9 @@ async def main() -> None:
         sys.exit(ExitCode.CONFIGURATION_ERROR)
 
     print(f"Starting review for Project: {project_id}, merge request: {mr_iid}")
+    print(
+        f"Filtering: Hard exclusions={settings.enable_hard_exclusions}, Claude API={settings.enable_claude_filtering}"
+    )
 
     gitlab_client = GitLabClient(
         base_url=settings.gitlab_base_url,
@@ -225,8 +228,45 @@ async def main() -> None:
         sys.exit(ExitCode.GENERAL_ERROR)
 
     if not final_output:
-        print("\n❌ Failed to get a structured review result from the agent.")
+        print("❌ Failed to get a structured review result from the agent.")
         sys.exit(ExitCode.GENERAL_ERROR)
+
+    # Filter findings to reduce false positives
+    original_finding_count = len(final_output.findings)
+    if settings.enable_hard_exclusions or settings.enable_claude_filtering:
+        print(f"\nFiltering {original_finding_count} findings...")
+
+        try:
+            filter = FindingsFilter(
+                use_hard_exclusions=settings.enable_hard_exclusions,
+                use_claude_filtering=settings.enable_claude_filtering,
+                api_key=settings.anthropic_api_key.get_secret_value(),
+                # model=settings.claude_filter_model,
+                # custom_filtering_instructions=settings.custom_filter_instructions,
+            )
+
+            # Apply FindingsFilter
+            filter_success, filtered_results, stats = filter.filter_findings(
+                findings=final_output.findings,
+                pr_context={"mr": mr_data},
+            )
+
+            if filter_success:
+                final_output.findings = filtered_results["filtered_findings"]
+                removed_count = original_finding_count - stats.kept_findings
+                print(
+                    f"Filtered: {removed_count} findings removed ({stats.hard_excluded} hard rules, "
+                    f"{stats.claude_excluded} Claude API)"
+                )
+
+                if filtered_results["analysis_summary"].get("average_confidence"):
+                    avg_conf = filtered_results["analysis_summary"]["average_confidence"]
+                    print(f"Average confidence: {avg_conf:.2f}")
+            else:
+                print("[Warning] Filtering failed, continuing with unfiltered results")
+
+        except Exception as e:
+            print(f"[Warning] Filtering error: {e}. Continuing with unfiltered results.")
 
     markdown_report = _format_review_to_markdown(final_output, mr_data)
     print("\n\n------ REVIEW REPORT ------\n")

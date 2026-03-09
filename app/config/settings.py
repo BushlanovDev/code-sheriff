@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     anthropic_base_url: str | None = Field(default=None, description="Anthropic API base url")
     claude_model: str = Field(description="Default claude model to use")
 
+    enable_hard_exclusions: bool = True
+    enable_claude_filtering: bool = True
+
     @model_validator(mode="before")
     @classmethod
     def resolve_gitlab_base_url_from_ci(cls, data: dict) -> dict:
