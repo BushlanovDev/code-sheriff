@@ -235,16 +235,25 @@ class FindingsFilter:
                     stats.exclusion_breakdown[key] = stats.exclusion_breakdown.get(key, 0) + 1
                 else:
                     findings_after_hard.append(finding)
-                    stats.kept_findings += 1
 
             print(f"Hard exclusions removed {stats.hard_excluded} findings")
         else:
             findings_after_hard = list(findings)
-            stats.kept_findings = len(findings)
 
-        # Step 2: Apply Claude API filtering if enabled TODO
+        # Step 2: Apply Claude API filtering if enabled
         findings_after_claude: List[Finding] = []
         excluded_claude: List[Dict[str, Any]] = []
+
+        if self.use_claude_filtering and findings_after_hard:
+            # Process findings individually
+            print(f"Processing {len(findings_after_hard)} findings through Claude API...")
+            # TODO
+        else:
+            # No Claude filtering - keep all findings from hard filter
+            for finding in findings_after_hard:
+                enriched_finding = finding.copy()
+                findings_after_claude.append(enriched_finding)
+                stats.kept_findings += 1
 
         # Combine all excluded findings
         all_excluded = excluded_hard + excluded_claude
@@ -254,8 +263,7 @@ class FindingsFilter:
 
         # Build filtered results
         filtered_results = {
-            "filtered_findings": findings_after_hard,
-            # "filtered_findings": findings_after_claude,
+            "filtered_findings": findings_after_claude,
             "excluded_findings": all_excluded,
             "analysis_summary": {
                 "total_findings": stats.total_findings,

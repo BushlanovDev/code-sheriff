@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Any
 
 from pydantic import Field, HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,8 +27,9 @@ class Settings(BaseSettings):
     anthropic_base_url: str | None = Field(default=None, description="Anthropic API base url")
     claude_model: str = Field(description="Default claude model to use")
 
-    enable_hard_exclusions: bool = True
-    enable_claude_filtering: bool = True
+    enable_hard_exclusions: bool = Field(default=True, description="Enable hard exclusions")
+    enable_claude_filtering: bool = Field(default=False, description="Enable claude filtering")
+    exclude_directories: list[str] | Any = Field(default_factory=list, description="Excluded directories")
 
     @model_validator(mode="before")
     @classmethod
@@ -40,6 +42,16 @@ class Settings(BaseSettings):
                 if ci_server_url:
                     data["gitlab_base_url"] = ci_server_url
         return data
+
+    @field_validator("exclude_directories", mode="before")
+    @classmethod
+    def parse_exclude_directories(cls, v: Any) -> list[str]:
+        """Parse comma-separated string into list"""
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if isinstance(v, list):
+            return v
+        return []
 
     @field_validator("gitlab_base_url", "anthropic_base_url")
     @classmethod

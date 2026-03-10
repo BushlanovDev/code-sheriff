@@ -33,16 +33,19 @@ def _retry_on_rate_limit(max_retries: int = 3, delay: int = 2):
 
 
 class GitLabClient:
-    def __init__(self, base_url: str, token: str):
-        """
-        Initialize the GitLab API client.
-        :param base_url: The base URL of the GitLab instance.
-        :param token: The GitLab access token.
+    def __init__(self, base_url: str, token: str, excluded_dirs: list[str] | None = None):
+        """Initialize the GitLab API client.
+
+        Args:
+            param base_url: The base URL of the GitLab instance.
+            param token: The GitLab access token.
+            excluded_dirs: Excluded directories.
         """
         self.base_url: str = base_url
         self.token: str = token
-        self.api_url: str = f"{self.base_url}/api/v4"
+        self.excluded_dirs: list[str] = excluded_dirs or []
 
+        self.api_url: str = f"{self.base_url}/api/v4"
         self.headers = {
             "PRIVATE-TOKEN": self.token,
             "Accept": "application/json",
@@ -99,6 +102,27 @@ class GitLabClient:
 
         return None
 
+    def _is_excluded(self, filepath: str) -> bool:
+        """Check if a file should be excluded based on directory patterns."""
+        for excluded_dir in self.excluded_dirs:
+            # Normalize excluded directory (remove leading ./ if present)
+            if excluded_dir.startswith("./"):
+                normalized_excluded = excluded_dir[2:]
+            else:
+                normalized_excluded = excluded_dir
+
+            # Check if file starts with excluded directory
+            if filepath.startswith(excluded_dir + "/"):
+                return True
+            if filepath.startswith(normalized_excluded + "/"):
+                return True
+
+            # Check if excluded directory appears anywhere in the path
+            if "/" + normalized_excluded + "/" in filepath:
+                return True
+
+        return False
+
     @_retry_on_rate_limit()
     def get_merge_request(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
         """Fetch metadata for a specific Merge Request.
@@ -137,6 +161,9 @@ class GitLabClient:
         """
         diff_text = ""
         for file in changes_data.get("changes", []):
+            if file.get("old_path", None) and self._is_excluded(file.get("old_path")):
+                continue
+
             old_path = file.get("old_path", "")
             new_path = file.get("new_path", "")
             diff = file.get("diff", "")

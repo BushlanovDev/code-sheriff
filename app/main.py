@@ -183,6 +183,7 @@ async def main() -> None:
     gitlab_client = GitLabClient(
         base_url=settings.gitlab_base_url,
         token=settings.gitlab_api_key.get_secret_value(),
+        excluded_dirs=settings.exclude_directories,
     )
 
     print("Getting merge request info...")
