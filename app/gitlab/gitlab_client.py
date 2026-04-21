@@ -1,7 +1,7 @@
-import time
 import re
+import time
 from functools import wraps
-from typing import Dict, Any, cast
+from typing import Any, cast
 from urllib.parse import quote
 
 import requests
@@ -57,7 +57,7 @@ class GitLabClient:
 
     def _parse_diff_position(
         self, diff: str, target_line: int, old_path: str, new_path: str, base_sha: str, head_sha: str, start_sha: str
-    ) -> Dict[str, Any] | None:
+    ) -> dict[str, Any] | None:
         """Parse diff to find position dict for a target line number.
 
         Args:
@@ -124,7 +124,7 @@ class GitLabClient:
         return False
 
     @_retry_on_rate_limit()
-    def get_merge_request(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
+    def get_merge_request(self, project_id: str, mr_iid: int) -> dict[str, Any]:
         """Fetch metadata for a specific Merge Request.
 
         GET /api/v4/projects/{id}/merge_requests/{mr_iid}
@@ -133,10 +133,10 @@ class GitLabClient:
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
 
-        return cast(Dict[str, Any], response.json())
+        return cast(dict[str, Any], response.json())
 
     @_retry_on_rate_limit()
-    def get_merge_request_changes(self, project_id: str, mr_iid: int) -> Dict[str, Any]:
+    def get_merge_request_changes(self, project_id: str, mr_iid: int) -> dict[str, Any]:
         """Fetch the diff and SHA references for a specific MR.
 
         Returns dict with 'changes' list and 'diff_refs' dict containing
@@ -148,9 +148,9 @@ class GitLabClient:
         response = requests.get(url, headers=self.headers)
         response.raise_for_status()
 
-        return cast(Dict[str, Any], response.json())
+        return cast(dict[str, Any], response.json())
 
-    def format_merge_request_diff(self, changes_data: Dict[str, Any]) -> str:
+    def format_merge_request_diff(self, changes_data: dict[str, Any]) -> str:
         """Format GitLab MR changes diff into unified diff string.
 
         Args:
@@ -176,8 +176,8 @@ class GitLabClient:
 
     @_retry_on_rate_limit()
     def create_merge_request_discussion(
-        self, project_id: str, mr_iid: int, position: Dict[str, Any], body: str
-    ) -> Dict[str, Any]:
+        self, project_id: str, mr_iid: int, position: dict[str, Any], body: str
+    ) -> dict[str, Any]:
         """Create an inline discussion on a specific line.
 
         POST /api/v4/projects/{id}/merge_requests/{mr_iid}/discussions
@@ -197,10 +197,10 @@ class GitLabClient:
         response = requests.post(url, headers=self.headers, json=payload)
         response.raise_for_status()
 
-        return cast(Dict[str, Any], response.json())
+        return cast(dict[str, Any], response.json())
 
     @_retry_on_rate_limit()
-    def create_merge_request_note(self, project_id: str, mr_iid: int, body: str) -> Dict[str, Any]:
+    def create_merge_request_note(self, project_id: str, mr_iid: int, body: str) -> dict[str, Any]:
         """Create a general note/comment on a Merge Request.
 
         POST /api/v4/projects/{id}/merge_requests/{mr_iid}/notes
@@ -210,9 +210,35 @@ class GitLabClient:
         response = requests.post(url, headers=self.headers, json=payload)
         response.raise_for_status()
 
-        return cast(Dict[str, Any], response.json())
+        return cast(dict[str, Any], response.json())
 
-    def build_position_for_issue(self, changes_data: Dict[str, Any], finding: Finding) -> Dict[str, Any] | None:
+    @_retry_on_rate_limit()
+    def get_merge_request_discussions(self, project_id: str, mr_iid: int) -> list[dict[str, Any]]:
+        """Fetch all discussions for a specific Merge Request.
+
+        GET /api/v4/projects/{id}/merge_requests/{mr_iid}/discussions
+        """
+        discussions = []
+        url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/discussions"
+        page = 1
+        while True:
+            params = {"page": page, "per_page": 100}
+            response = requests.get(url, headers=self.headers, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            if not data:
+                break
+
+            discussions.extend(data)
+
+            if "X-Next-Page" not in response.headers or not response.headers["X-Next-Page"]:
+                break
+            page += 1
+
+        return discussions
+
+    def build_position_for_issue(self, changes_data: dict[str, Any], finding: Finding) -> dict[str, Any] | None:
         """Build GitLab discussion position for a security issue.
 
         Args:

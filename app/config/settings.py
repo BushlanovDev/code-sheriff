@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     enable_hard_exclusions: bool = Field(default=True, description="Enable hard exclusions")
     enable_claude_filtering: bool = Field(default=False, description="Enable claude filtering")
     exclude_directories: list[str] | Any = Field(default_factory=list, description="Excluded directories")
+    custom_filter_instructions: str | None = Field(
+        default=None, description="Path to custom false positive filtering instructions text file",
+    )
+    custom_security_scan_instructions: str | None = Field(
+        default=None, description="Path to custom security scan instructions text file to append to audit prompt",
+    )
 
     @model_validator(mode="before")
     @classmethod

@@ -3,7 +3,8 @@
 import re
 import time
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Tuple, Pattern
+from re import Pattern
+from typing import Any
 
 from app.claude import Finding
 
@@ -16,8 +17,8 @@ class FilterStats:
     hard_excluded: int = 0
     claude_excluded: int = 0
     kept_findings: int = 0
-    exclusion_breakdown: Dict[str, int] = field(default_factory=dict)
-    confidence_scores: List[float] = field(default_factory=list)
+    exclusion_breakdown: dict[str, int] = field(default_factory=dict)
+    confidence_scores: list[float] = field(default_factory=list)
     runtime_seconds: float = 0.0
 
 
@@ -25,20 +26,20 @@ class HardExclusionRules:
     """Hard exclusion rules for common false positives."""
 
     # Pre-compiled regex patterns for better performance
-    _DOS_PATTERNS: List[Pattern] = [
+    _DOS_PATTERNS: list[Pattern] = [
         re.compile(r"\b(denial of service|dos attack|resource exhaustion)\b", re.IGNORECASE),
         re.compile(r"\b(exhaust|overwhelm|overload).*?(resource|memory|cpu)\b", re.IGNORECASE),
         re.compile(r"\b(infinite|unbounded).*?(loop|recursion)\b", re.IGNORECASE),
     ]
 
-    _RATE_LIMITING_PATTERNS: List[Pattern] = [
+    _RATE_LIMITING_PATTERNS: list[Pattern] = [
         re.compile(r"\b(missing|lack of|no)\s+rate\s+limit", re.IGNORECASE),
         re.compile(r"\brate\s+limiting\s+(missing|required|not implemented)", re.IGNORECASE),
         re.compile(r"\b(implement|add)\s+rate\s+limit", re.IGNORECASE),
         re.compile(r"\bunlimited\s+(requests|calls|api)", re.IGNORECASE),
     ]
 
-    _RESOURCE_PATTERNS: List[Pattern] = [
+    _RESOURCE_PATTERNS: list[Pattern] = [
         re.compile(r"\b(resource|memory|file)\s+leak\s+potential", re.IGNORECASE),
         re.compile(r"\bunclosed\s+(resource|file|connection)", re.IGNORECASE),
         re.compile(r"\b(close|cleanup|release)\s+(resource|file|connection)", re.IGNORECASE),
@@ -46,13 +47,13 @@ class HardExclusionRules:
         re.compile(r"\b(database|thread|socket|connection)\s+leak", re.IGNORECASE),
     ]
 
-    _OPEN_REDIRECT_PATTERNS: List[Pattern] = [
+    _OPEN_REDIRECT_PATTERNS: list[Pattern] = [
         re.compile(r"\b(open redirect|unvalidated redirect)\b", re.IGNORECASE),
         re.compile(r"\b(redirect.(attack|exploit|vulnerability))\b", re.IGNORECASE),
         re.compile(r"\b(malicious.redirect)\b", re.IGNORECASE),
     ]
 
-    _MEMORY_SAFETY_PATTERNS: List[Pattern] = [
+    _MEMORY_SAFETY_PATTERNS: list[Pattern] = [
         re.compile(r"\b(buffer overflow|stack overflow|heap overflow)\b", re.IGNORECASE),
         re.compile(r"\b(oob)\s+(read|write|access)\b", re.IGNORECASE),
         re.compile(r"\b(out.?of.?bounds?)\b", re.IGNORECASE),
@@ -64,13 +65,13 @@ class HardExclusionRules:
         re.compile(r"\barbitrary.?(memory read|pointer dereference|memory address|memory pointer)\b", re.IGNORECASE),
     ]
 
-    _REGEX_INJECTION: List[Pattern] = [
+    _REGEX_INJECTION: list[Pattern] = [
         re.compile(r"\b(regex|regular expression)\s+injection\b", re.IGNORECASE),
         re.compile(r"\b(regex|regular expression)\s+denial of service\b", re.IGNORECASE),
         re.compile(r"\b(regex|regular expression)\s+flooding\b", re.IGNORECASE),
     ]
 
-    _SSRF_PATTERNS: List[Pattern] = [
+    _SSRF_PATTERNS: list[Pattern] = [
         re.compile(r"\b(ssrf|server\s+.?side\s+.?request\s+.?forgery)\b", re.IGNORECASE),
     ]
 
@@ -179,8 +180,8 @@ class FindingsFilter:
         self.custom_filtering_instructions = custom_filtering_instructions
 
     def filter_findings(
-        self, findings: List[Finding], pr_context: Dict[str, Any] | None = None
-    ) -> Tuple[bool, Dict[str, Any], FilterStats]:
+        self, findings: list[Finding], pr_context: dict[str, Any] | None = None
+    ) -> tuple[bool, dict[str, Any], FilterStats]:
         """Filter security findings to remove false positives.
 
         Args:
@@ -241,8 +242,8 @@ class FindingsFilter:
             findings_after_hard = list(findings)
 
         # Step 2: Apply Claude API filtering if enabled
-        findings_after_claude: List[Finding] = []
-        excluded_claude: List[Dict[str, Any]] = []
+        findings_after_claude: list[Finding] = []
+        excluded_claude: list[dict[str, Any]] = []
 
         if self.use_claude_filtering and findings_after_hard:
             # Process findings individually

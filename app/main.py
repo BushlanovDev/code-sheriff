@@ -2,16 +2,15 @@ import asyncio
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Tuple, Any, Dict
+from typing import Any
 
 import requests
-from claude_agent_sdk import AssistantMessage, ResultMessage, ClaudeSDKClient
+from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage
 from pydantic import ValidationError
 
-from app.claude import get_claude_code_agent, SecurityReviewOutput
-
-from app import get_security_audit_prompt, FindingsFilter
-from app.config import get_settings, Settings
+from app import FindingsFilter, get_security_audit_prompt
+from app.claude import Finding, SecurityReviewOutput, get_claude_code_agent
+from app.config import Settings, get_settings
 from app.constants import ExitCode
 from app.gitlab import GitLabClient
 
@@ -31,7 +30,7 @@ def _get_settings() -> Settings:
     return settings
 
 
-def _merge_request_param(settings: Settings) -> Tuple[str, int]:
+def _merge_request_param(settings: Settings) -> tuple[str, int]:
     """Get project and merge request from GitLab environment or args"""
     project_id = settings.ci_project_id
     mr_iid = settings.ci_merge_request_iid
@@ -48,14 +47,14 @@ def _merge_request_param(settings: Settings) -> Tuple[str, int]:
     return project_id, int(mr_iid)
 
 
-def _get_block_input_dict(block: Any) -> Dict[str, Any]:
+def _get_block_input_dict(block: Any) -> dict[str, Any]:
     input_data = getattr(block, "input", {}) or {}
     if isinstance(input_data, dict):
         return input_data
     return getattr(input_data, "__dict__", {}) or {}
 
 
-def _get_tool_summary(name: str, block_input: Dict[str, Any]) -> str:
+def _get_tool_summary(name: str, block_input: dict[str, Any]) -> str:
     match name:
         case "Bash":
             return str(block_input.get("command", "command"))
@@ -71,7 +70,7 @@ def _get_tool_summary(name: str, block_input: Dict[str, Any]) -> str:
             return "..."
 
 
-def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: Dict | None = None) -> str:
+def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: dict | None = None) -> str:
     """Format the JSON review result into a nice GitLab Markdown string."""
     # score = result.get('overallScore', 0)
     # summary = result.get('summary', 'No summary provided.')
@@ -97,7 +96,7 @@ def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: Dict | Non
 
     md += f"### 📊 Issues Found ({len(findings)})\n\n"
 
-    categorized_findings: Dict[str, list] = defaultdict(list)
+    categorized_findings: dict[str, list] = defaultdict(list)
     for finding in findings:
         categorized_findings[str(finding.severity)].append(finding)
 
@@ -150,7 +149,7 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
                     input_tokens = usage.get("input_tokens", 0)
                     output_tokens = usage.get("output_tokens", 0)
 
-                    print(f"\n✅ Review complete!")
+                    print("\n✅ Review complete!")
                     print(f"Cost: ${cost:.4f}")
                     print(f"Duration: {duration:.4f}")
                     print(f"Input tokens: {input_tokens}")
@@ -211,15 +210,33 @@ async def main() -> None:
         sys.exit(ExitCode.SUCCESS)
 
     mr_diff = gitlab_client.format_merge_request_diff(mr_changes)
+
+    # Read custom instructions from files if provided
+    custom_scan_text = None
+    if settings.custom_security_scan_instructions:
+        scan_path = Path(settings.custom_security_scan_instructions)
+        if scan_path.exists():
+            custom_scan_text = scan_path.read_text(encoding="utf-8")
+        else:
+            print(f"[Warning] Custom security scan instructions file not found: {scan_path}")
+
+    custom_filter_text = None
+    if settings.custom_filter_instructions:
+        filter_path = Path(settings.custom_filter_instructions)
+        if filter_path.exists():
+            custom_filter_text = filter_path.read_text(encoding="utf-8")
+        else:
+            print(f"[Warning] Custom false positive filtering instructions file not found: {filter_path}")
+
     # Generate security audit prompt
-    prompt = get_security_audit_prompt(mr_data, mr_diff)
+    prompt = get_security_audit_prompt(mr_data, mr_diff, custom_scan_text)
 
     # Check prompt size
     prompt_size = len(prompt.encode("utf-8"))
     if prompt_size > 1024 * 1024:  # 1MB
         print(f"[Warning] Large prompt size: {prompt_size / 1024 / 1024:.2f}MB")
 
-    print(f"🤖 Run Claude Code security audit")
+    print("🤖 Run Claude Code security audit")
     final_output: SecurityReviewOutput | None = None
     try:
         claude_code_agent = get_claude_code_agent(settings, repo_dir)
@@ -243,7 +260,7 @@ async def main() -> None:
                 use_claude_filtering=settings.enable_claude_filtering,
                 api_key=settings.anthropic_api_key.get_secret_value(),
                 # model=settings.claude_filter_model,
-                # custom_filtering_instructions=settings.custom_filter_instructions,
+                custom_filtering_instructions=custom_filter_text,
             )
 
             # Apply FindingsFilter
@@ -278,10 +295,35 @@ async def main() -> None:
     gitlab_client.create_merge_request_note(project_id, mr_iid, markdown_report)
     print("Summary posted successfully!")
 
+    print("Checking for existing discussions...")
+    try:
+        existing_discussions = gitlab_client.get_merge_request_discussions(project_id, mr_iid)
+    except Exception as e:
+        print(f"[Warning] Failed to fetch existing discussions: {e}. Duplicate prevention disabled.")
+        existing_discussions = []
+
+    # Flatten all notes to check for duplicates
+    existing_note_bodies = []
+    for disc in existing_discussions:
+        for note in disc.get("notes", []):
+            existing_note_bodies.append(note.get("body", ""))
+
+    def is_duplicate_finding(f: Finding) -> bool:
+        for note_body in existing_note_bodies:
+            # If the category and description are both in the note, it's considered a duplicate
+            if f.category in note_body and f.description in note_body:
+                return True
+        return False
+
     # Post inline discussions for each findings
     discussions_created = 0
+    orphan_findings = []
 
     for finding in final_output.findings:
+        if is_duplicate_finding(finding):
+            print(f"Skipping duplicate finding: {finding.file}:{finding.line} ({finding.category})")
+            continue
+
         # Format issue as markdown
         severity_icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(finding.severity, "⚪")
 
@@ -300,15 +342,35 @@ async def main() -> None:
                 if e.response.status_code == 400:
                     # Invalid position, fall back to summary
                     print(f"[Warning] Invalid position for {finding.file}:{finding.line}")
-                    # orphan_findings.append(finding)
+                    orphan_findings.append(finding)
                 else:
                     raise
         else:
             # No position found, add to orphans
             print(f"[Warning] Could not find position for {finding.file}:{finding.line}")
-            # orphan_findings.append(finding)
+            orphan_findings.append(finding)
 
     print(f"Created {discussions_created} inline discussions")
+
+    if orphan_findings:
+        print(f"Found {len(orphan_findings)} orphan findings, adding as general MR note...")
+        orphan_body = "### ⚠️ Security Issues (Unmatched Diff Positions)\n\n"
+        orphan_body += (
+            "The following issues were identified but could not be mapped to specific lines in the MR diff:\n\n"
+        )
+        for finding in orphan_findings:
+            severity_icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(finding.severity, "⚪")
+            location = f"`{finding.file}:{finding.line}`" if finding.line else f"`{finding.file}`"
+            orphan_body += f"#### {severity_icon} {finding.severity}: {finding.category} at {location}\n"
+            orphan_body += f"{finding.description}\n\n"
+            orphan_body += f"**Exploit Scenario:** {finding.exploit_scenario}\n\n"
+            orphan_body += f"**Recommendation:** {finding.recommendation}\n\n"
+            orphan_body += "---\n\n"
+
+        try:
+            gitlab_client.create_merge_request_note(project_id, mr_iid, orphan_body)
+        except Exception as e:
+            print(f"Failed to post orphan findings note: {e}")
 
     high_sev_count = sum(1 for i in final_output.findings if i.severity in ["HIGH"])
     if high_sev_count > 0:

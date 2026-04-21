@@ -1,14 +1,17 @@
 """Security and code review prompt templates for GitLab agent."""
 
-from typing import Dict, Any
+from typing import Any
 
 
-def get_security_audit_prompt(mr_data: Dict[str, Any], diff_text: str) -> str:
+def get_security_audit_prompt(
+    mr_data: dict[str, Any], diff_text: str, custom_scan_instructions: str | None = None
+) -> str:
     """Generate security and code review prompt for Merge Request analysis.
 
     Args:
         mr_data: MR metadata from GitLab API
         diff_text: Formatted unified diff of the entire MR
+        custom_scan_instructions: Optional custom security categories or instructions to append
 
     Returns:
         Formatted prompt string
@@ -18,6 +21,8 @@ def get_security_audit_prompt(mr_data: Dict[str, Any], diff_text: str) -> str:
     author = mr_data.get("author", {}).get("name", "Unknown")
     source_branch = mr_data.get("source_branch", "?")
     target_branch = mr_data.get("target_branch", "?")
+
+    custom_categories_section = f"\n{custom_scan_instructions}\n" if custom_scan_instructions else ""
 
     return f"""
 You are a senior security engineer conducting a focused security review of a GitLab Merge Request: "{title}"
@@ -83,7 +88,7 @@ SECURITY CATEGORIES TO EXAMINE:
 - PII handling violations
 - API endpoint data leakage
 - Debug information exposure
-
+{custom_categories_section}
 Additional notes:
 - Even if something is only exploitable from the local network, it can still be a HIGH severity issue
 

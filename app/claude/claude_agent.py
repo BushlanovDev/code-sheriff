@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Literal
+from typing import Literal
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import SystemPromptPreset
@@ -28,7 +28,7 @@ class AnalysisSummary(BaseModel):
 
 
 class SecurityReviewOutput(BaseModel):
-    findings: List[Finding]
+    findings: list[Finding]
     analysis_summary: AnalysisSummary
 
 
