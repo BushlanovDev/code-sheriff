@@ -4,12 +4,13 @@ from typing import Any
 
 
 def get_security_audit_prompt(
-    mr_data: dict[str, Any], diff_text: str, custom_scan_instructions: str | None = None
+    mr_data: dict[str, Any], changed_files: list[str], diff_text: str, custom_scan_instructions: str | None = None
 ) -> str:
     """Generate security and code review prompt for Merge Request analysis.
 
     Args:
         mr_data: MR metadata from GitLab API
+        changed_files: List of file paths modified in the PR without excluded
         diff_text: Formatted unified diff of the entire MR
         custom_scan_instructions: Optional custom security categories or instructions to append
 
@@ -23,6 +24,7 @@ def get_security_audit_prompt(
     target_branch = mr_data.get("target_branch", "?")
 
     custom_categories_section = f"\n{custom_scan_instructions}\n" if custom_scan_instructions else ""
+    files_changed_list = "\n".join([f"- {f}" for f in changed_files])
 
     return f"""
 You are a senior security engineer conducting a focused security review of a GitLab Merge Request: "{title}"
@@ -31,6 +33,9 @@ CONTEXT:
 - Author: {author}
 - Source Branch: {source_branch} → Target Branch: {target_branch}
 - MR Description: {description}
+
+FILES MODIFIED:
+{files_changed_list}
 
 MERGE REQUEST DIFF CONTENT:
 ```diff

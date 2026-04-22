@@ -176,7 +176,7 @@ async def main() -> None:
 
     print(f"Starting review for Project: {project_id}, merge request: {mr_iid}")
     print(
-        f"Filtering: Hard exclusions={settings.enable_hard_exclusions}, Claude API={settings.enable_claude_filtering}"
+        f"Filtering: Hard exclusions={settings.enable_hard_exclusions}, LLM={settings.enable_claude_filtering}"
     )
 
     gitlab_client = GitLabClient(
@@ -209,6 +209,17 @@ async def main() -> None:
         print("No changes detected in MR")
         sys.exit(ExitCode.SUCCESS)
 
+    # Build changed files list without excluded files
+    changed_files = []
+    for change in mr_changes.get("changes", []):
+        old_path = change.get("old_path", "")
+        new_path = change.get("new_path", "")
+        if not ((old_path and gitlab_client._is_excluded(old_path)) or (new_path and gitlab_client._is_excluded(new_path))):
+            if new_path:
+                changed_files.append(new_path)
+            elif old_path:
+                changed_files.append(old_path)
+
     mr_diff = gitlab_client.format_merge_request_diff(mr_changes)
 
     # Read custom instructions from files if provided
@@ -229,7 +240,7 @@ async def main() -> None:
             print(f"[Warning] Custom false positive filtering instructions file not found: {filter_path}")
 
     # Generate security audit prompt
-    prompt = get_security_audit_prompt(mr_data, mr_diff, custom_scan_text)
+    prompt = get_security_audit_prompt(mr_data, changed_files, mr_diff, custom_scan_text)
 
     # Check prompt size
     prompt_size = len(prompt.encode("utf-8"))
@@ -256,15 +267,14 @@ async def main() -> None:
 
         try:
             filter = FindingsFilter(
+                model=settings.claude_model,
                 use_hard_exclusions=settings.enable_hard_exclusions,
                 use_claude_filtering=settings.enable_claude_filtering,
-                api_key=settings.anthropic_api_key.get_secret_value(),
-                # model=settings.claude_filter_model,
                 custom_filtering_instructions=custom_filter_text,
             )
 
             # Apply FindingsFilter
-            filter_success, filtered_results, stats = filter.filter_findings(
+            filter_success, filtered_results, stats = await filter.filter_findings(
                 findings=final_output.findings,
                 pr_context={"mr": mr_data},
             )
@@ -274,7 +284,7 @@ async def main() -> None:
                 removed_count = original_finding_count - stats.kept_findings
                 print(
                     f"Filtered: {removed_count} findings removed ({stats.hard_excluded} hard rules, "
-                    f"{stats.claude_excluded} Claude API)"
+                    f"{stats.claude_excluded} LLM)"
                 )
 
                 if filtered_results["analysis_summary"].get("average_confidence"):
@@ -285,6 +295,16 @@ async def main() -> None:
 
         except Exception as e:
             print(f"[Warning] Filtering error: {e}. Continuing with unfiltered results.")
+
+    # Apply finding-level directory exclusion
+    final_kept_findings = []
+    for finding in final_output.findings:
+        if finding.file and gitlab_client._is_excluded(finding.file):
+            print(f"Skipping finding in excluded directory: {finding.file}")
+            continue
+        final_kept_findings.append(finding)
+
+    final_output.findings = final_kept_findings
 
     markdown_report = _format_review_to_markdown(final_output, mr_data)
     print("\n\n------ REVIEW REPORT ------\n")
@@ -302,11 +322,13 @@ async def main() -> None:
         print(f"[Warning] Failed to fetch existing discussions: {e}. Duplicate prevention disabled.")
         existing_discussions = []
 
-    # Flatten all notes to check for duplicates
     existing_note_bodies = []
     for disc in existing_discussions:
         for note in disc.get("notes", []):
-            existing_note_bodies.append(note.get("body", ""))
+            body = note.get("body", "")
+            if body.startswith("## 🤖 Code Review"):
+                continue
+            existing_note_bodies.append(body)
 
     def is_duplicate_finding(f: Finding) -> bool:
         for note_body in existing_note_bodies:

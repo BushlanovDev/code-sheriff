@@ -32,6 +32,13 @@ class SecurityReviewOutput(BaseModel):
     analysis_summary: AnalysisSummary
 
 
+class FilterOutput(BaseModel):
+    confidence_score: float
+    justification: str
+    keep_finding: bool
+    exclusion_reason: str | None
+
+
 def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient:
     review_schema = {
         "type": "object",
@@ -89,6 +96,37 @@ def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient
         output_format={
             "type": "json_schema",
             "schema": review_schema,
+        },
+    )
+
+    return ClaudeSDKClient(options=options)
+
+
+def get_claude_filter_agent(model: str) -> ClaudeSDKClient:
+    filter_schema = {
+        "type": "object",
+        "properties": {
+            "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "justification": {"type": "string"},
+            "keep_finding": {"type": "boolean"},
+            "exclusion_reason": {"type": "string"},
+        },
+        "required": ["confidence_score", "justification", "keep_finding"],
+    }
+
+    options = ClaudeAgentOptions(
+        model=model,
+        setting_sources=["project"],
+        allowed_tools=["StructuredOutput"],
+        disallowed_tools=["Write", "Edit", "WebSearch", "WebFetch", "AskUserQuestion",
+                          "TodoWrite", "Bash", "Read","Grep", "Glob"],
+        permission_mode="bypassPermissions",
+        max_turns=10,
+        cwd=Path.cwd(),
+        system_prompt=SystemPromptPreset(type="preset", preset="claude_code"),
+        output_format={
+            "type": "json_schema",
+            "schema": filter_schema,
         },
     )
 

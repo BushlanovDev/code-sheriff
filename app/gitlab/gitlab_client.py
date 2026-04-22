@@ -161,7 +161,10 @@ class GitLabClient:
         """
         diff_text = ""
         for file in changes_data.get("changes", []):
-            if file.get("old_path", None) and self._is_excluded(file.get("old_path")):
+            old_path = file.get("old_path", "")
+            new_path = file.get("new_path", "")
+
+            if (old_path and self._is_excluded(old_path)) or (new_path and self._is_excluded(new_path)):
                 continue
 
             old_path = file.get("old_path", "")

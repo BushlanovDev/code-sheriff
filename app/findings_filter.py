@@ -155,31 +155,30 @@ class FindingsFilter:
 
     Implements two-stage filtering:
     1. Hard exclusion rules (regex-based)
-    2. Claude API filtering (optional, for single finding validation)
+    2. LLM filtering (optional, for single finding validation)
     """
 
     def __init__(
         self,
+        model: str,
         use_hard_exclusions: bool = True,
         use_claude_filtering: bool = True,
-        api_key: str | None = None,
-        model: str = "claude-3-5-haiku-20241022",
         custom_filtering_instructions: str | None = None,
     ):
         """Initialize findings filter.
 
         Args:
-            use_hard_exclusions: Whether to apply hard exclusion rules
-            use_claude_filtering: Whether to use Claude API for filtering
-            api_key: API key for Claude filtering
             model: Claude model to use for filtering
+            use_hard_exclusions: Whether to apply hard exclusion rules
+            use_claude_filtering: Whether to use LLM for filtering
             custom_filtering_instructions: Optional custom filtering instructions
         """
+        self.model = model
         self.use_hard_exclusions = use_hard_exclusions
         self.use_claude_filtering = use_claude_filtering
         self.custom_filtering_instructions = custom_filtering_instructions
 
-    def filter_findings(
+    async def filter_findings(
         self, findings: list[Finding], pr_context: dict[str, Any] | None = None
     ) -> tuple[bool, dict[str, Any], FilterStats]:
         """Filter security findings to remove false positives.
@@ -241,14 +240,72 @@ class FindingsFilter:
         else:
             findings_after_hard = list(findings)
 
-        # Step 2: Apply Claude API filtering if enabled
+        # Step 2: Apply LLM filtering if enabled
         findings_after_claude: list[Finding] = []
         excluded_claude: list[dict[str, Any]] = []
 
         if self.use_claude_filtering and findings_after_hard:
             # Process findings individually
-            print(f"Processing {len(findings_after_hard)} findings through Claude API...")
-            # TODO
+            print(f"Processing {len(findings_after_hard)} findings through LLM...")
+            from app.claude import FilterOutput, get_claude_filter_agent
+            from claude_agent_sdk import ResultMessage
+
+            filter_agent = get_claude_filter_agent(self.model)
+
+            for finding in findings_after_hard:
+                finding_json = finding.model_dump_json(indent=2)
+
+                pr_info = ""
+                if pr_context:
+                    mr = pr_context.get("mr")
+                    if isinstance(mr, dict):
+                        pr_info = f"PR Context:\n- Title: {mr.get('title', 'unknown')}\n- Description: {(mr.get('description') or '')[:500]}..."
+
+                filtering_section = (
+                    self.custom_filtering_instructions
+                    or "Evaluate this security finding to determine if it is a false positive or low-impact issue that should be EXCLUDED from the final report. Assign a confidence score from 0.0 to 1.0."
+                )
+
+                prompt = f"I need you to analyze a security finding from an automated code audit and determine if it's a false positive.\n\n{pr_info}\n\n{filtering_section}\n\nFinding to analyze:\n```json\n{finding_json}\n```\n\nRespond using the structured output tool."
+
+                try:
+                    result_output: dict | None = None
+                    async with filter_agent:
+                        await filter_agent.query(prompt)
+                        async for message in filter_agent.receive_response():
+                            if (
+                                isinstance(message, ResultMessage)
+                                and message.subtype == "success"
+                                and message.structured_output
+                            ):
+                                result_output = message.structured_output
+
+                    if result_output:
+                        filter_result = FilterOutput.model_validate(result_output)
+                        stats.confidence_scores.append(filter_result.confidence_score)
+
+                        if not filter_result.keep_finding:
+                            excluded_claude.append(
+                                {
+                                    "finding": finding,
+                                    "confidence_score": filter_result.confidence_score,
+                                    "exclusion_reason": filter_result.exclusion_reason or "Excluded by LLM",
+                                    "justification": filter_result.justification,
+                                    "filter_stage": "claude_api",
+                                }
+                            )
+                            stats.claude_excluded += 1
+                        else:
+                            findings_after_claude.append(finding.copy())
+                            stats.kept_findings += 1
+                    else:
+                        print(f"LLM returned no result for finding in {finding.file}:{finding.line}")
+                        findings_after_claude.append(finding.copy())
+                        stats.kept_findings += 1
+                except Exception as e:
+                    print(f"Error querying filter agent for finding {finding.file}:{finding.line} - {e}")
+                    findings_after_claude.append(finding.copy())
+                    stats.kept_findings += 1
         else:
             # No Claude filtering - keep all findings from hard filter
             for finding in findings_after_hard:
