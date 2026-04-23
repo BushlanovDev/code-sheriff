@@ -10,7 +10,7 @@ def get_security_audit_prompt(
 
     Args:
         mr_data: MR metadata from GitLab API
-        changed_files: List of file paths modified in the PR without excluded
+        changed_files: List of file paths modified in the MR without excluded
         diff_text: Formatted unified diff of the entire MR
         custom_scan_instructions: Optional custom security categories or instructions to append
 
@@ -143,7 +143,12 @@ You MUST output your findings as structured JSON with this exact schema:
   }}
 }}
 
-IMPORTANT: The "line" number MUST refer to the line in the NEW version of the file (after the + changes). Look at the diff hunk headers to identify the correct line numbers in the modified version.
+LINE NUMBERING:
+The "line" number MUST accurately refer to the line in the NEW version of the file.
+To avoid hallucinating line numbers:
+- Count carefully from the `+` line number in the `@@ ... +new_line,count @@` hunk header.
+- Remember that deleted lines (starting with `-`) do NOT increase the line counter for the new file. Only context lines (starting with a space) and added lines (starting with `+`) increase the new line counter.
+- If you have any doubt, use the `Grep` tool or `Bash` with `cat -n` to find the exact line number of the vulnerable code snippet in the local file. Do not just guess.
 
 SEVERITY GUIDELINES:
 - **HIGH**: Directly exploitable vulnerabilities leading to RCE, data breach, or authentication bypass
@@ -157,7 +162,7 @@ CONFIDENCE SCORING:
 - Below 0.7: Don't report (too speculative)
 
 FINAL REMINDER:
-Focus on HIGH and MEDIUM findings only. Better to miss some theoretical issues than flood the report with false positives. Each finding should be something a security engineer would confidently raise in a PR review.
+Focus on HIGH and MEDIUM findings only. Better to miss some theoretical issues than flood the report with false positives. Each finding should be something a security engineer would confidently raise in a MR review.
 
 IMPORTANT EXCLUSIONS - DO NOT REPORT:
 - Denial of Service (DOS) vulnerabilities or resource exhaustion attacks
@@ -166,7 +171,36 @@ IMPORTANT EXCLUSIONS - DO NOT REPORT:
 - Memory consumption or CPU exhaustion issues.
 - Lack of input validation on non-security-critical fields. If there isn't a proven problem from a lack of input validation, don't report it.
 
-Begin your analysis now. Use the repository exploration tools to understand the codebase context, then analyze the PR changes for security implications.
+Begin your analysis now. Use the repository exploration tools to understand the codebase context, then analyze the MR changes for security implications.
 
 Your final reply must contain the JSON and nothing else. You should not reply again after outputting the JSON.
+"""
+
+
+def get_filtering_prompt(mr_info: str, finding_json: str, filtering_section: str, file_content_section: str) -> str:
+    """Generate filtering prompt for LLM.
+
+    Args:
+        mr_info: Formatted MR context string.
+        finding_json: JSON representation of the finding.
+        filtering_section: Custom filtering instructions or default.
+        file_content_section: Content of the file where the finding was found.
+
+    Returns:
+        Formatted prompt string.
+    """
+    return f"""
+I need you to analyze a security finding from an automated code audit and determine if it's a false positive.
+
+{mr_info}
+
+{filtering_section}
+
+Finding to analyze:
+```json
+{finding_json}
+```
+{file_content_section}
+
+Respond using the structured output tool.
 """

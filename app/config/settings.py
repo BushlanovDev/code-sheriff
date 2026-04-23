@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     claude_model: str = Field(description="Default claude model to use")
 
     enable_hard_exclusions: bool = Field(default=True, description="Enable hard exclusions")
-    enable_claude_filtering: bool = Field(default=False, description="Enable claude filtering")
+    enable_claude_filtering: bool = Field(default=False, description="Enable llm filtering")
     exclude_directories: list[str] | Any = Field(default_factory=list, description="Excluded directories")
     custom_filter_instructions: str | None = Field(
         default=None, description="Path to custom false positive filtering instructions text file",

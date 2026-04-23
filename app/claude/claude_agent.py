@@ -36,7 +36,7 @@ class FilterOutput(BaseModel):
     confidence_score: float
     justification: str
     keep_finding: bool
-    exclusion_reason: str | None
+    exclusion_reason: str | None = None
 
 
 def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient:

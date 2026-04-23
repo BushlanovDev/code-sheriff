@@ -216,6 +216,19 @@ class GitLabClient:
         return cast(dict[str, Any], response.json())
 
     @_retry_on_rate_limit()
+    def update_merge_request_note(self, project_id: str, mr_iid: int, note_id: int, body: str) -> dict[str, Any]:
+        """Update a general note/comment on a Merge Request.
+
+        PUT /api/v4/projects/{id}/merge_requests/{mr_iid}/notes/{note_id}
+        """
+        url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/notes/{note_id}"
+        payload = {"body": body}
+        response = requests.put(url, headers=self.headers, json=payload)
+        response.raise_for_status()
+
+        return cast(dict[str, Any], response.json())
+
+    @_retry_on_rate_limit()
     def get_merge_request_discussions(self, project_id: str, mr_iid: int) -> list[dict[str, Any]]:
         """Fetch all discussions for a specific Merge Request.
 

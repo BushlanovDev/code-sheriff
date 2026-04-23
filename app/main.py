@@ -271,12 +271,13 @@ async def main() -> None:
                 use_hard_exclusions=settings.enable_hard_exclusions,
                 use_claude_filtering=settings.enable_claude_filtering,
                 custom_filtering_instructions=custom_filter_text,
+                repo_dir=repo_dir,
             )
 
             # Apply FindingsFilter
             filter_success, filtered_results, stats = await filter.filter_findings(
                 findings=final_output.findings,
-                pr_context={"mr": mr_data},
+                mr_context={"mr": mr_data},
             )
 
             if filter_success:
@@ -311,10 +312,6 @@ async def main() -> None:
     print(markdown_report)
     print("---------------------------\n")
 
-    print("Posting comments to GitLab MR...")
-    gitlab_client.create_merge_request_note(project_id, mr_iid, markdown_report)
-    print("Summary posted successfully!")
-
     print("Checking for existing discussions...")
     try:
         existing_discussions = gitlab_client.get_merge_request_discussions(project_id, mr_iid)
@@ -322,19 +319,49 @@ async def main() -> None:
         print(f"[Warning] Failed to fetch existing discussions: {e}. Duplicate prevention disabled.")
         existing_discussions = []
 
-    existing_note_bodies = []
+    existing_notes_info = []
+    summary_note_id = None
     for disc in existing_discussions:
         for note in disc.get("notes", []):
             body = note.get("body", "")
             if body.startswith("## 🤖 Code Review"):
+                if summary_note_id is None:
+                    summary_note_id = note.get("id")
                 continue
-            existing_note_bodies.append(body)
+            existing_notes_info.append({
+                "body": body,
+                "position": note.get("position")
+            })
+
+    print("Posting comments to GitLab MR...")
+    if summary_note_id:
+        gitlab_client.update_merge_request_note(project_id, mr_iid, summary_note_id, markdown_report)
+        print("Summary updated successfully!")
+    else:
+        gitlab_client.create_merge_request_note(project_id, mr_iid, markdown_report)
+        print("Summary posted successfully!")
 
     def is_duplicate_finding(f: Finding) -> bool:
-        for note_body in existing_note_bodies:
-            # If the category and description are both in the note, it's considered a duplicate
-            if f.category in note_body and f.description in note_body:
+        severity_marker = {"HIGH": "🔴 HIGH", "MEDIUM": "🟠 MEDIUM", "LOW": "🟡 LOW"}.get(f.severity, f"⚪ {f.severity}")
+
+        for note_info in existing_notes_info:
+            body = note_info["body"]
+            pos = note_info["position"]
+
+            if severity_marker not in body:
+                continue
+
+            # 1. Inline note position match
+            if pos:
+                if (pos.get("new_path") == f.file and pos.get("new_line") == f.line) or \
+                   (pos.get("old_path") == f.file and pos.get("old_line") == f.line):
+                    return True
+
+            # 2. Orphan note match in general MR notes
+            location_str = f"`{f.file}:{f.line}`" if f.line else f"`{f.file}`"
+            if location_str in body:
                 return True
+
         return False
 
     # Post inline discussions for each findings

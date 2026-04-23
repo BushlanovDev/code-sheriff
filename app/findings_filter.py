@@ -3,9 +3,11 @@
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from re import Pattern
 from typing import Any
 
+from app.prompts import get_filtering_prompt
 from app.claude import Finding
 
 
@@ -164,6 +166,7 @@ class FindingsFilter:
         use_hard_exclusions: bool = True,
         use_claude_filtering: bool = True,
         custom_filtering_instructions: str | None = None,
+        repo_dir: Path | None = None,
     ):
         """Initialize findings filter.
 
@@ -172,20 +175,44 @@ class FindingsFilter:
             use_hard_exclusions: Whether to apply hard exclusion rules
             use_claude_filtering: Whether to use LLM for filtering
             custom_filtering_instructions: Optional custom filtering instructions
+            repo_dir: Optional repository path for resolving files
         """
         self.model = model
         self.use_hard_exclusions = use_hard_exclusions
         self.use_claude_filtering = use_claude_filtering
         self.custom_filtering_instructions = custom_filtering_instructions
+        self.repo_dir = repo_dir
+
+    def _read_file(self, file_path: str) -> tuple[bool, str, str]:
+        """Read a file to include its context in the prompt."""
+        try:
+            path = Path(file_path)
+            if not path.is_absolute() and self.repo_dir:
+                path = self.repo_dir / file_path
+
+            if not path.exists():
+                return False, "", f"File not found: {path}"
+            if not path.is_file():
+                return False, "", f"Path is not a file: {path}"
+
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                with open(path, "r", encoding="latin-1") as f:
+                    content = f.read()
+            return True, content, ""
+        except Exception as e:
+            return False, "", f"Error reading file {file_path}: {str(e)}"
 
     async def filter_findings(
-        self, findings: list[Finding], pr_context: dict[str, Any] | None = None
+        self, findings: list[Finding], mr_context: dict[str, Any] | None = None
     ) -> tuple[bool, dict[str, Any], FilterStats]:
         """Filter security findings to remove false positives.
 
         Args:
             findings: List of security findings from Claude audit
-            pr_context: Optional context (commit data, etc.)
+            mr_context: Optional context (commit data, etc.)
 
         Returns:
             Tuple of (success, filtered_results, stats)
@@ -236,7 +263,7 @@ class FindingsFilter:
                 else:
                     findings_after_hard.append(finding)
 
-            print(f"Hard exclusions removed {stats.hard_excluded} findings")
+            print(f"Hard exclusions removed {stats.hard_excluded} findings\n")
         else:
             findings_after_hard = list(findings)
 
@@ -255,18 +282,26 @@ class FindingsFilter:
             for finding in findings_after_hard:
                 finding_json = finding.model_dump_json(indent=2)
 
-                pr_info = ""
-                if pr_context:
-                    mr = pr_context.get("mr")
+                mr_info = ""
+                if mr_context:
+                    mr = mr_context.get("mr")
                     if isinstance(mr, dict):
-                        pr_info = f"PR Context:\n- Title: {mr.get('title', 'unknown')}\n- Description: {(mr.get('description') or '')[:500]}..."
+                        mr_info = f"MR Context:\n- Title: {mr.get('title', 'unknown')}\n- Description: {(mr.get('description') or '')[:500]}..."
+
+                file_content_section = ""
+                if finding.file:
+                    success, content, err = self._read_file(finding.file)
+                    if success:
+                        file_content_section = f"\n\nFile Content ({finding.file}):\n```\n{content}\n```"
+                    else:
+                        file_content_section = f"\n\nFile Content ({finding.file}): Error reading file - {err}"
 
                 filtering_section = (
                     self.custom_filtering_instructions
                     or "Evaluate this security finding to determine if it is a false positive or low-impact issue that should be EXCLUDED from the final report. Assign a confidence score from 0.0 to 1.0."
                 )
 
-                prompt = f"I need you to analyze a security finding from an automated code audit and determine if it's a false positive.\n\n{pr_info}\n\n{filtering_section}\n\nFinding to analyze:\n```json\n{finding_json}\n```\n\nRespond using the structured output tool."
+                prompt = get_filtering_prompt(mr_info, finding_json, filtering_section, file_content_section)
 
                 try:
                     result_output: dict | None = None
@@ -338,7 +373,7 @@ class FindingsFilter:
         }
 
         print(
-            f"Filtering completed: {stats.kept_findings}/{stats.total_findings} findings kept ({stats.runtime_seconds:.1f}s)"
+            f"Filtering completed: {stats.kept_findings}/{stats.total_findings} findings kept ({stats.runtime_seconds:.1f}s)\n"
         )
 
         return True, filtered_results, stats
