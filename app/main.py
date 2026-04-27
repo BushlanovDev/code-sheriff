@@ -70,6 +70,19 @@ def _get_tool_summary(name: str, block_input: dict[str, Any]) -> str:
             return "..."
 
 
+def _is_already_reviewed(discussions: list[dict], head_sha: str) -> bool:
+    """Check if a review summary note already exists for this commit SHA."""
+    if not head_sha:
+        return False
+    sha_short = head_sha[:8]
+    for disc in discussions:
+        for note in disc.get("notes", []):
+            body = note.get("body", "")
+            if body.startswith("## 🤖 Code Review") and sha_short in body:
+                return True
+    return False
+
+
 def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: dict | None = None) -> str:
     """Format the JSON review result into a nice GitLab Markdown string."""
     # score = result.get('overallScore', 0)
@@ -85,6 +98,9 @@ def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: dict | Non
         md += f": !{mr_iid}\n\n"
         md += f"**Branch:** `{mr_data.get('source_branch', '?')}` → `{mr_data.get('target_branch', '?')}`\n"
         md += f"**Author:** {mr_data.get('author', {}).get('name', 'Unknown')}\n"
+        sha = mr_data.get("sha", "")
+        if sha:
+            md += f"**Commit:** `{sha[:8]}`\n"
     else:
         md += "\n"
 
@@ -197,6 +213,20 @@ async def main() -> None:
         print(f"MR is {mr_data.get('state')}, skipping review")
         sys.exit(ExitCode.SUCCESS)
 
+    # Fetch existing discussions early (used for caching and later for duplicate check)
+    existing_discussions: list[dict] = []
+    try:
+        existing_discussions = gitlab_client.get_merge_request_discussions(project_id, mr_iid)
+    except Exception as e:
+        print(f"[Warning] Failed to fetch existing discussions: {e}")
+
+    # Check if review already done for current head SHA
+    if settings.skip_reviewed:
+        head_sha = mr_data.get("sha", "")
+        if _is_already_reviewed(existing_discussions, head_sha):
+            print(f"Review already exists for SHA {head_sha[:8]}, skipping.")
+            sys.exit(ExitCode.SUCCESS)
+
     print("Getting merge request changes...")
     try:
         mr_changes = gitlab_client.get_merge_request_changes(project_id, mr_iid)
@@ -209,16 +239,20 @@ async def main() -> None:
         print("No changes detected in MR")
         sys.exit(ExitCode.SUCCESS)
 
-    # Build changed files list without excluded files
+    # Build changed files list without excluded and generated files
     changed_files = []
     for change in mr_changes.get("changes", []):
         old_path = change.get("old_path", "")
         new_path = change.get("new_path", "")
-        if not ((old_path and gitlab_client._is_excluded(old_path)) or (new_path and gitlab_client._is_excluded(new_path))):
-            if new_path:
-                changed_files.append(new_path)
-            elif old_path:
-                changed_files.append(old_path)
+        if (old_path and gitlab_client._is_excluded(old_path)) or (new_path and gitlab_client._is_excluded(new_path)):
+            continue
+        diff = change.get("diff", "")
+        if gitlab_client._is_generated(diff):
+            continue
+        if new_path:
+            changed_files.append(new_path)
+        elif old_path:
+            changed_files.append(old_path)
 
     mr_diff = gitlab_client.format_merge_request_diff(mr_changes)
 
@@ -312,11 +346,12 @@ async def main() -> None:
     print(markdown_report)
     print("---------------------------\n")
 
+    # Re-fetch discussions to get any new ones created during the review
     print("Checking for existing discussions...")
     try:
         existing_discussions = gitlab_client.get_merge_request_discussions(project_id, mr_iid)
     except Exception as e:
-        print(f"[Warning] Failed to fetch existing discussions: {e}. Duplicate prevention disabled.")
+        print(f"[Warning] Failed to re-fetch discussions: {e}. Using previously fetched data.")
         existing_discussions = []
 
     existing_notes_info = []

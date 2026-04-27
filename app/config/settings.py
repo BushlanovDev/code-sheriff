@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     custom_security_scan_instructions: str | None = Field(
         default=None, description="Path to custom security scan instructions text file to append to audit prompt",
     )
+    skip_reviewed: bool = Field(
+        default=True, description="Skip review if summary already exists for current commit SHA",
+    )
 
     @model_validator(mode="before")
     @classmethod

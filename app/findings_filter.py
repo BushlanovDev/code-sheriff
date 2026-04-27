@@ -296,12 +296,12 @@ class FindingsFilter:
                     else:
                         file_content_section = f"\n\nFile Content ({finding.file}): Error reading file - {err}"
 
-                filtering_section = (
-                    self.custom_filtering_instructions
-                    or "Evaluate this security finding to determine if it is a false positive or low-impact issue that should be EXCLUDED from the final report. Assign a confidence score from 0.0 to 1.0."
+                prompt = get_filtering_prompt(
+                    mr_info=mr_info,
+                    finding_json=finding_json,
+                    filtering_section=self.custom_filtering_instructions,
+                    file_content_section=file_content_section,
                 )
-
-                prompt = get_filtering_prompt(mr_info, finding_json, filtering_section, file_content_section)
 
                 try:
                     result_output: dict | None = None
