@@ -7,8 +7,8 @@ from pathlib import Path
 from re import Pattern
 from typing import Any
 
-from app.prompts import get_filtering_prompt
 from app.claude import Finding
+from app.prompts import get_filtering_prompt
 
 
 @dataclass
@@ -196,10 +196,10 @@ class FindingsFilter:
                 return False, "", f"Path is not a file: {path}"
 
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     content = f.read()
             except UnicodeDecodeError:
-                with open(path, "r", encoding="latin-1") as f:
+                with open(path, encoding="latin-1") as f:
                     content = f.read()
             return True, content, ""
         except Exception as e:
@@ -274,8 +274,9 @@ class FindingsFilter:
         if self.use_claude_filtering and findings_after_hard:
             # Process findings individually
             print(f"Processing {len(findings_after_hard)} findings through LLM...")
-            from app.claude import FilterOutput, get_claude_filter_agent
             from claude_agent_sdk import ResultMessage
+
+            from app.claude import FilterOutput, get_claude_filter_agent
 
             filter_agent = get_claude_filter_agent(self.model)
 
@@ -286,7 +287,8 @@ class FindingsFilter:
                 if mr_context:
                     mr = mr_context.get("mr")
                     if isinstance(mr, dict):
-                        mr_info = f"MR Context:\n- Title: {mr.get('title', 'unknown')}\n- Description: {(mr.get('description') or '')[:500]}..."
+                        mr_info = (f"MR Context:\n- Title: {mr.get('title', 'unknown')}\n"
+                                   f"- Description: {(mr.get('description') or '')[:500]}...")
 
                 file_content_section = ""
                 if finding.file:
@@ -373,7 +375,8 @@ class FindingsFilter:
         }
 
         print(
-            f"Filtering completed: {stats.kept_findings}/{stats.total_findings} findings kept ({stats.runtime_seconds:.1f}s)\n"
+            f"Filtering completed: {stats.kept_findings}/{stats.total_findings} "
+            f"findings kept ({stats.runtime_seconds:.1f}s)\n"
         )
 
         return True, filtered_results, stats

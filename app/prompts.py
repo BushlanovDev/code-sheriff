@@ -44,7 +44,7 @@ MERGE REQUEST DIFF CONTENT:
 Review the complete diff above. This contains all code changes in the MR.
 
 OBJECTIVE:
-Perform a security-focused code review to identify HIGH-CONFIDENCE security vulnerabilities that could have real exploitation potential. This is not a general code review - focus ONLY on security implications newly added by this PR. Do not comment on existing security concerns.
+Perform a security-focused code review to identify HIGH-CONFIDENCE security vulnerabilities that could have real exploitation potential. This is not a general code review - focus ONLY on security implications newly added by this MR. Do not comment on existing security concerns.
 
 CRITICAL INSTRUCTIONS:
 1. MINIMIZE FALSE POSITIVES: Only flag issues where you're >80% confident of actual exploitability
@@ -246,11 +246,22 @@ I need you to analyze a security finding from an automated code audit and determ
 
 {filtering_section}
 
+Assign a confidence score from 0.0 to 1.0:
+- 0.0-0.3: Low confidence, likely false positive or noise
+- 0.4-0.6: Medium confidence, needs investigation
+- 0.7-1.0: High confidence, likely true vulnerability
+
 Finding to analyze:
 ```json
 {finding_json}
 ```
 {file_content_section}
 
-Respond using the structured output tool.
+Respond using the structured output tool with EXACTLY this JSON structure (no markdown, no code blocks):
+{{
+  "confidence_score": 0.85,
+  "keep_finding": true,
+  "exclusion_reason": null,
+  "justification": "Clear SQL injection vulnerability with specific exploit path"
+}}
 """

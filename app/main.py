@@ -179,7 +179,7 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
 
 
 async def main() -> None:
-    """Main execution function for GitHub Action."""
+    """Main execution function for GitLab Action."""
     settings = _get_settings()
     # Get project and merge request from GitLab environment or args
     project_id, mr_iid = _merge_request_param(settings)
@@ -377,7 +377,8 @@ async def main() -> None:
         print("Summary posted successfully!")
 
     def is_duplicate_finding(f: Finding) -> bool:
-        severity_marker = {"HIGH": "🔴 HIGH", "MEDIUM": "🟠 MEDIUM", "LOW": "🟡 LOW"}.get(f.severity, f"⚪ {f.severity}")
+        severity_marker = ({"HIGH": "🔴 HIGH", "MEDIUM": "🟠 MEDIUM", "LOW": "🟡 LOW"}
+                           .get(f.severity, f"⚪ {f.severity}"))
 
         for note_info in existing_notes_info:
             body = note_info["body"]

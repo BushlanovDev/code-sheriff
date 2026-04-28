@@ -3,7 +3,7 @@ from typing import Literal
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import SystemPromptPreset
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import Settings
 
@@ -33,9 +33,9 @@ class SecurityReviewOutput(BaseModel):
 
 
 class FilterOutput(BaseModel):
-    confidence_score: float
-    justification: str
-    keep_finding: bool
+    confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    justification: str = ""
+    keep_finding: bool = True
     exclusion_reason: str | None = None
 
 

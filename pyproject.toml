@@ -10,6 +10,9 @@ dependencies = [
     "requests>=2.32.5",
 ]
 
+[tool.uv]
+package = true
+
 [project.scripts]
 review-agent = "app.main:cli_main"
 
