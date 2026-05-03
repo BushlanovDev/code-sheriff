@@ -119,7 +119,7 @@ def get_claude_filter_agent(model: str) -> ClaudeSDKClient:
         setting_sources=["project"],
         allowed_tools=["StructuredOutput"],
         disallowed_tools=["Write", "Edit", "WebSearch", "WebFetch", "AskUserQuestion",
-                          "TodoWrite", "Bash", "Read","Grep", "Glob"],
+                          "TodoWrite", "Bash", "Read", "Grep", "Glob"],
         permission_mode="bypassPermissions",
         max_turns=10,
         cwd=Path.cwd(),

@@ -1,0 +1,7 @@
+services:
+  review-agent:
+    build: .
+    env_file: .env
+    entrypoint: [ "bash" ]
+    stdin_open: true
+    tty: true

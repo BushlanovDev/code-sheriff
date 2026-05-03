@@ -287,8 +287,10 @@ class FindingsFilter:
                 if mr_context:
                     mr = mr_context.get("mr")
                     if isinstance(mr, dict):
-                        mr_info = (f"MR Context:\n- Title: {mr.get('title', 'unknown')}\n"
-                                   f"- Description: {(mr.get('description') or '')[:500]}...")
+                        mr_info = (
+                            f"MR Context:\n- Title: {mr.get('title', 'unknown')}\n"
+                            f"- Description: {(mr.get('description') or '')[:500]}..."
+                        )
 
                 file_content_section = ""
                 if finding.file:

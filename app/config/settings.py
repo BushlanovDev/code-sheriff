@@ -31,13 +31,16 @@ class Settings(BaseSettings):
     enable_claude_filtering: bool = Field(default=False, description="Enable llm filtering")
     exclude_directories: list[str] | Any = Field(default_factory=list, description="Excluded directories")
     custom_filter_instructions: str | None = Field(
-        default=None, description="Path to custom false positive filtering instructions text file",
+        default=None,
+        description="Path to custom false positive filtering instructions text file",
     )
     custom_security_scan_instructions: str | None = Field(
-        default=None, description="Path to custom security scan instructions text file to append to audit prompt",
+        default=None,
+        description="Path to custom security scan instructions text file to append to audit prompt",
     )
     skip_reviewed: bool = Field(
-        default=True, description="Skip review if summary already exists for current commit SHA",
+        default=True,
+        description="Skip review if summary already exists for current commit SHA",
     )
 
     @model_validator(mode="before")

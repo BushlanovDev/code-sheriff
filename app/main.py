@@ -6,6 +6,7 @@ from typing import Any
 
 import requests
 from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage
+from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from app import FindingsFilter, get_security_audit_prompt
@@ -13,6 +14,8 @@ from app.claude import Finding, SecurityReviewOutput, get_claude_code_agent
 from app.config import Settings, get_settings
 from app.constants import ExitCode
 from app.gitlab import GitLabClient
+
+load_dotenv()
 
 
 def _get_settings() -> Settings:
@@ -165,14 +168,15 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
                     input_tokens = usage.get("input_tokens", 0)
                     output_tokens = usage.get("output_tokens", 0)
 
-                    print("\n✅ Review complete!")
-                    print(f"Cost: ${cost:.4f}")
-                    print(f"Duration: {duration:.4f}")
+                    print("\n✅ Review complete!\n")
+                    print(f"Cost: ${cost:.2f}")
+                    print(f"Duration: {duration:.2f}")
                     print(f"Input tokens: {input_tokens}")
                     print(f"Output tokens: {output_tokens}")
                     print(f"Tokens per second: {output_tokens / duration:.2f}")
                 else:
                     print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
+                    print(f"❌ Result: {getattr(message, 'result', 'unknown result')}")
                     sys.exit(ExitCode.GENERAL_ERROR)
 
     return final_output
@@ -191,9 +195,7 @@ async def main() -> None:
         sys.exit(ExitCode.CONFIGURATION_ERROR)
 
     print(f"Starting review for Project: {project_id}, merge request: {mr_iid}")
-    print(
-        f"Filtering: Hard exclusions={settings.enable_hard_exclusions}, LLM={settings.enable_claude_filtering}"
-    )
+    print(f"Filtering: Hard exclusions={settings.enable_hard_exclusions}, LLM={settings.enable_claude_filtering}\n")
 
     gitlab_client = GitLabClient(
         base_url=settings.gitlab_base_url,
@@ -281,7 +283,7 @@ async def main() -> None:
     if prompt_size > 1024 * 1024:  # 1MB
         print(f"[Warning] Large prompt size: {prompt_size / 1024 / 1024:.2f}MB")
 
-    print("🤖 Run Claude Code security audit")
+    print("\n🤖 Run Claude Code security audit")
     final_output: SecurityReviewOutput | None = None
     try:
         claude_code_agent = get_claude_code_agent(settings, repo_dir)
@@ -342,9 +344,7 @@ async def main() -> None:
     final_output.findings = final_kept_findings
 
     markdown_report = _format_review_to_markdown(final_output, mr_data)
-    print("\n\n------ REVIEW REPORT ------\n")
-    print(markdown_report)
-    print("---------------------------\n")
+    print(f"\n{markdown_report}")
 
     # Re-fetch discussions to get any new ones created during the review
     print("Checking for existing discussions...")
@@ -363,10 +363,7 @@ async def main() -> None:
                 if summary_note_id is None:
                     summary_note_id = note.get("id")
                 continue
-            existing_notes_info.append({
-                "body": body,
-                "position": note.get("position")
-            })
+            existing_notes_info.append({"body": body, "position": note.get("position")})
 
     print("Posting comments to GitLab MR...")
     if summary_note_id:
@@ -377,8 +374,9 @@ async def main() -> None:
         print("Summary posted successfully!")
 
     def is_duplicate_finding(f: Finding) -> bool:
-        severity_marker = ({"HIGH": "🔴 HIGH", "MEDIUM": "🟠 MEDIUM", "LOW": "🟡 LOW"}
-                           .get(f.severity, f"⚪ {f.severity}"))
+        severity_marker = {"HIGH": "🔴 HIGH", "MEDIUM": "🟠 MEDIUM", "LOW": "🟡 LOW"}.get(
+            f.severity, f"⚪ {f.severity}"
+        )
 
         for note_info in existing_notes_info:
             body = note_info["body"]
@@ -389,8 +387,9 @@ async def main() -> None:
 
             # 1. Inline note position match
             if pos:
-                if (pos.get("new_path") == f.file and pos.get("new_line") == f.line) or \
-                   (pos.get("old_path") == f.file and pos.get("old_line") == f.line):
+                if (pos.get("new_path") == f.file and pos.get("new_line") == f.line) or (
+                    pos.get("old_path") == f.file and pos.get("old_line") == f.line
+                ):
                     return True
 
             # 2. Orphan note match in general MR notes
@@ -459,12 +458,10 @@ async def main() -> None:
 
     high_sev_count = sum(1 for i in final_output.findings if i.severity in ["HIGH"])
     if high_sev_count > 0:
-        print(f"Analysis failed: Found {high_sev_count} HIGH/MEDIUM issues. Rejecting MR.")
+        print(f"\nAnalysis failed: Found {high_sev_count} HIGH/MEDIUM issues. Rejecting MR.")
         sys.exit(ExitCode.GENERAL_ERROR)
 
-    #################################################################################
-
-    print("Code is clean. Success!")
+    print("\nCode is clean. Success!")
     sys.exit(ExitCode.SUCCESS)
 
 
