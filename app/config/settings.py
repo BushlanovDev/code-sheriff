@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr = Field(description="Anthropic API Key")
     anthropic_base_url: str | None = Field(default=None, description="Anthropic API base url")
     claude_model: str = Field(description="Default claude model to use")
+    claude_filtering_model: str | None = Field(default=None, description="Claude model for filtering")
 
     enable_hard_exclusions: bool = Field(default=True, description="Enable hard exclusions")
     enable_claude_filtering: bool = Field(default=False, description="Enable llm filtering")

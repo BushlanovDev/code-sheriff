@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from app import FindingsFilter, get_security_audit_prompt
 from app.claude import Finding, SecurityReviewOutput, get_claude_code_agent
 from app.config import Settings, get_settings
-from app.constants import ExitCode
+from app.constants import MAX_PROMPT_SIZE_BYTES, REVIEW_HEADER, SEVERITY_ICONS, ExitCode, Severity
 from app.gitlab import GitLabClient
 
 load_dotenv()
@@ -81,7 +81,7 @@ def _is_already_reviewed(discussions: list[dict], head_sha: str) -> bool:
     for disc in discussions:
         for note in disc.get("notes", []):
             body = note.get("body", "")
-            if body.startswith("## 🤖 Code Review") and sha_short in body:
+            if body.startswith(REVIEW_HEADER) and sha_short in body:
                 return True
     return False
 
@@ -93,7 +93,7 @@ def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: dict | Non
     findings = result.findings
     analysis_summary = result.analysis_summary
 
-    md = "## 🤖 Code Review"
+    md = f"{REVIEW_HEADER}"
 
     # Add MR reference if available
     if mr_data:
@@ -115,19 +115,19 @@ def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: dict | Non
 
     md += f"### 📊 Issues Found ({len(findings)})\n\n"
 
-    categorized_findings: dict[str, list] = defaultdict(list)
+    categorized_findings: dict[Severity, list] = defaultdict(list)
     for finding in findings:
-        categorized_findings[str(finding.severity)].append(finding)
+        categorized_findings[finding.severity].append(finding)
 
     # Print in order of severity
-    for severity in ["HIGH", "MEDIUM", "LOW"]:
+    for severity in [Severity.HIGH, Severity.MEDIUM, Severity.LOW]:
         cat_findings = categorized_findings[severity]
         if not cat_findings:
             continue
 
-        icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(severity, "⚪")
+        icon = SEVERITY_ICONS.get(severity, "⚪")
 
-        md += f"#### {icon}  {severity} ({len(cat_findings)})\n"
+        md += f"#### {icon}  {severity.value} ({len(cat_findings)})\n"
 
         for finding in cat_findings:
             location = f"`{finding.file}:{finding.line}`" if finding.line else f"`{finding.file}`"
@@ -280,7 +280,7 @@ async def main() -> None:
 
     # Check prompt size
     prompt_size = len(prompt.encode("utf-8"))
-    if prompt_size > 1024 * 1024:  # 1MB
+    if prompt_size > MAX_PROMPT_SIZE_BYTES:
         print(f"[Warning] Large prompt size: {prompt_size / 1024 / 1024:.2f}MB")
 
     print("\n🤖 Run Claude Code security audit")
@@ -303,7 +303,7 @@ async def main() -> None:
 
         try:
             filter = FindingsFilter(
-                model=settings.claude_model,
+                model=settings.claude_filtering_model or settings.claude_model,
                 use_hard_exclusions=settings.enable_hard_exclusions,
                 use_claude_filtering=settings.enable_claude_filtering,
                 custom_filtering_instructions=custom_filter_text,
@@ -359,7 +359,7 @@ async def main() -> None:
     for disc in existing_discussions:
         for note in disc.get("notes", []):
             body = note.get("body", "")
-            if body.startswith("## 🤖 Code Review"):
+            if body.startswith(REVIEW_HEADER):
                 if summary_note_id is None:
                     summary_note_id = note.get("id")
                 continue
@@ -374,9 +374,8 @@ async def main() -> None:
         print("Summary posted successfully!")
 
     def is_duplicate_finding(f: Finding) -> bool:
-        severity_marker = {"HIGH": "🔴 HIGH", "MEDIUM": "🟠 MEDIUM", "LOW": "🟡 LOW"}.get(
-            f.severity, f"⚪ {f.severity}"
-        )
+        icon = SEVERITY_ICONS.get(f.severity, "⚪")
+        severity_marker = f"{icon} {f.severity.value}"
 
         for note_info in existing_notes_info:
             body = note_info["body"]
@@ -409,9 +408,9 @@ async def main() -> None:
             continue
 
         # Format issue as markdown
-        severity_icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(finding.severity, "⚪")
+        severity_icon = SEVERITY_ICONS.get(finding.severity, "⚪")
 
-        issue_body = f"### {severity_icon} {finding.severity}: {finding.category}\n\n"
+        issue_body = f"### {severity_icon} {finding.severity.value}: {finding.category}\n\n"
         issue_body += f"{finding.description}\n\n"
         issue_body += f"{finding.exploit_scenario}\n\n"
         issue_body += f"{finding.recommendation}\n\n"
@@ -443,9 +442,9 @@ async def main() -> None:
             "The following issues were identified but could not be mapped to specific lines in the MR diff:\n\n"
         )
         for finding in orphan_findings:
-            severity_icon = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡"}.get(finding.severity, "⚪")
+            severity_icon = SEVERITY_ICONS.get(finding.severity, "⚪")
             location = f"`{finding.file}:{finding.line}`" if finding.line else f"`{finding.file}`"
-            orphan_body += f"#### {severity_icon} {finding.severity}: {finding.category} at {location}\n"
+            orphan_body += f"#### {severity_icon} {finding.severity.value}: {finding.category} at {location}\n"
             orphan_body += f"{finding.description}\n\n"
             orphan_body += f"**Exploit Scenario:** {finding.exploit_scenario}\n\n"
             orphan_body += f"**Recommendation:** {finding.recommendation}\n\n"
@@ -456,7 +455,7 @@ async def main() -> None:
         except Exception as e:
             print(f"Failed to post orphan findings note: {e}")
 
-    high_sev_count = sum(1 for i in final_output.findings if i.severity in ["HIGH"])
+    high_sev_count = sum(1 for i in final_output.findings if i.severity in [Severity.HIGH])
     if high_sev_count > 0:
         print(f"\nAnalysis failed: Found {high_sev_count} HIGH/MEDIUM issues. Rejecting MR.")
         sys.exit(ExitCode.GENERAL_ERROR)

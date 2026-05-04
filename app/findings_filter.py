@@ -22,6 +22,10 @@ class FilterStats:
     exclusion_breakdown: dict[str, int] = field(default_factory=dict)
     confidence_scores: list[float] = field(default_factory=list)
     runtime_seconds: float = 0.0
+    total_cost_usd: float = 0.0
+    total_duration_api_seconds: float = 0.0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
 
 class HardExclusionRules:
@@ -318,6 +322,11 @@ class FindingsFilter:
                                 and message.structured_output
                             ):
                                 result_output = message.structured_output
+                                stats.total_cost_usd += getattr(message, "total_cost_usd", 0.0)
+                                stats.total_duration_api_seconds += getattr(message, "duration_api_ms", 0) / 1000
+                                usage = getattr(message, "usage", {})
+                                stats.total_input_tokens += usage.get("input_tokens", 0)
+                                stats.total_output_tokens += usage.get("output_tokens", 0)
 
                     if result_output:
                         filter_result = FilterOutput.model_validate(result_output)
@@ -373,12 +382,23 @@ class FindingsFilter:
                 if stats.confidence_scores
                 else None,
                 "runtime_seconds": stats.runtime_seconds,
+                "total_cost_usd": stats.total_cost_usd,
+                "total_duration_api_seconds": stats.total_duration_api_seconds,
+                "total_input_tokens": stats.total_input_tokens,
+                "total_output_tokens": stats.total_output_tokens,
             },
         }
 
         print(
-            f"Filtering completed: {stats.kept_findings}/{stats.total_findings} "
+            f"✅ Filtering completed: {stats.kept_findings}/{stats.total_findings} "
             f"findings kept ({stats.runtime_seconds:.1f}s)\n"
         )
+        if self.use_claude_filtering and stats.total_duration_api_seconds > 0:
+            print(f"Filter Cost: ${stats.total_cost_usd:.2f}")
+            print(f"Filter API Duration: {stats.total_duration_api_seconds:.2f}s")
+            print(f"Filter Input tokens: {stats.total_input_tokens}")
+            print(f"Filter Output tokens: {stats.total_output_tokens}")
+            tokens_per_sec = stats.total_output_tokens / stats.total_duration_api_seconds
+            print(f"Filter Tokens per second: {tokens_per_sec:.2f}\n")
 
         return True, filtered_results, stats

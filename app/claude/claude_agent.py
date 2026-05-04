@@ -1,17 +1,17 @@
 from pathlib import Path
-from typing import Literal
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk.types import SystemPromptPreset
 from pydantic import BaseModel, Field
 
 from app.config import Settings
+from app.constants import Severity
 
 
 class Finding(BaseModel):
     file: str
     line: int
-    severity: Literal["LOW", "MEDIUM", "HIGH"]
+    severity: Severity
     category: str
     description: str
     exploit_scenario: str
