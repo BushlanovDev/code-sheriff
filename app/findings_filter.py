@@ -282,8 +282,6 @@ class FindingsFilter:
 
             from app.claude import FilterOutput, get_claude_filter_agent
 
-            filter_agent = get_claude_filter_agent(self.model)
-
             for finding in findings_after_hard:
                 finding_json = finding.model_dump_json(indent=2)
 
@@ -312,6 +310,7 @@ class FindingsFilter:
                 )
 
                 try:
+                    filter_agent = get_claude_filter_agent(self.model)
                     result_output: dict | None = None
                     async with filter_agent:
                         await filter_agent.query(prompt)

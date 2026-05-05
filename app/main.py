@@ -173,7 +173,8 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
                     print(f"Duration: {duration:.2f}")
                     print(f"Input tokens: {input_tokens}")
                     print(f"Output tokens: {output_tokens}")
-                    print(f"Tokens per second: {output_tokens / duration:.2f}")
+                    if duration > 0:
+                        print(f"Tokens per second: {output_tokens / duration:.2f}")
                 else:
                     print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
                     print(f"❌ Result: {getattr(message, 'result', 'unknown result')}")
@@ -275,8 +276,25 @@ async def main() -> None:
         else:
             print(f"[Warning] Custom false positive filtering instructions file not found: {filter_path}")
 
+    # Compute change statistics for the prompt
+    total_additions = 0
+    total_deletions = 0
+    for change in mr_changes.get("changes", []):
+        diff = change.get("diff", "")
+        for line in diff.split("\n"):
+            if line.startswith("+") and not line.startswith("+++"):
+                total_additions += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                total_deletions += 1
+
+    changes_stats = {
+        "files_changed": len(changed_files),
+        "additions": total_additions,
+        "deletions": total_deletions,
+    }
+
     # Generate security audit prompt
-    prompt = get_security_audit_prompt(mr_data, changed_files, mr_diff, custom_scan_text)
+    prompt = get_security_audit_prompt(mr_data, changed_files, mr_diff, custom_scan_text, changes_stats=changes_stats)
 
     # Check prompt size
     prompt_size = len(prompt.encode("utf-8"))
@@ -289,8 +307,23 @@ async def main() -> None:
         claude_code_agent = get_claude_code_agent(settings, repo_dir)
         final_output = await _run_security_audit(claude_code_agent, prompt)
     except Exception as e:
-        print(f"❌ Claude code agent error: {e}")
-        sys.exit(ExitCode.GENERAL_ERROR)
+        error_msg = str(e).lower()
+        # If prompt is too long — retry without diff
+        if "prompt is too long" in error_msg or "prompt too long" in error_msg:
+            print(f"[Warning] Prompt too long ({prompt_size} bytes), retrying without diff...")
+            prompt_without_diff = get_security_audit_prompt(
+                mr_data, changed_files, mr_diff, custom_scan_text, include_diff=False,
+                changes_stats=changes_stats,
+            )
+            try:
+                claude_code_agent = get_claude_code_agent(settings, repo_dir)
+                final_output = await _run_security_audit(claude_code_agent, prompt_without_diff)
+            except Exception as retry_err:
+                print(f"❌ Claude code agent error (retry without diff): {retry_err}")
+                sys.exit(ExitCode.GENERAL_ERROR)
+        else:
+            print(f"❌ Claude code agent error: {e}")
+            sys.exit(ExitCode.GENERAL_ERROR)
 
     if not final_output:
         print("❌ Failed to get a structured review result from the agent.")
@@ -457,7 +490,7 @@ async def main() -> None:
 
     high_sev_count = sum(1 for i in final_output.findings if i.severity in [Severity.HIGH])
     if high_sev_count > 0:
-        print(f"\nAnalysis failed: Found {high_sev_count} HIGH/MEDIUM issues. Rejecting MR.")
+        print(f"\nAnalysis failed: Found {high_sev_count} HIGH severity issues. Rejecting MR.")
         sys.exit(ExitCode.GENERAL_ERROR)
 
     print("\nCode is clean. Success!")

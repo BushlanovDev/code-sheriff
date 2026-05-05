@@ -49,7 +49,12 @@ PRECEDENTS -
 
 
 def get_security_audit_prompt(
-    mr_data: dict[str, Any], changed_files: list[str], diff_text: str, custom_scan_instructions: str | None = None
+    mr_data: dict[str, Any],
+    changed_files: list[str],
+    diff_text: str,
+    custom_scan_instructions: str | None = None,
+    include_diff: bool = True,
+    changes_stats: dict[str, int] | None = None,
 ) -> str:
     """Generate security and code review prompt for Merge Request analysis.
 
@@ -58,6 +63,9 @@ def get_security_audit_prompt(
         changed_files: List of file paths modified in the MR without excluded
         diff_text: Formatted unified diff of the entire MR
         custom_scan_instructions: Optional custom security categories or instructions to append
+        include_diff: Whether to include the diff in the prompt (default: True).
+            Set to False when prompt is too large.
+        changes_stats: Optional dict with keys 'files_changed', 'additions', 'deletions'
 
     Returns:
         Formatted prompt string
@@ -71,6 +79,31 @@ def get_security_audit_prompt(
     custom_categories_section = f"\n{custom_scan_instructions}\n" if custom_scan_instructions else ""
     files_changed_list = "\n".join([f"- {f}" for f in changed_files])
 
+    # Build diff section based on include_diff flag
+    if diff_text and include_diff:
+        diff_section = f"""
+MERGE REQUEST DIFF CONTENT:
+```diff
+{diff_text}
+```
+Review the complete diff above. This contains all code changes in the MR.
+"""
+    elif diff_text and not include_diff:
+        diff_section = """
+NOTE: MR diff was omitted due to size constraints. Please use the file exploration tools (Glob, Read, Grep, Bash) to examine the specific files that were changed in this MR.
+"""
+    else:
+        diff_section = ""
+
+    # Build stats line if available
+    stats_lines = ""
+    if changes_stats:
+        stats_lines = (
+            f"- Files changed: {changes_stats.get('files_changed', len(changed_files))}\n"
+            f"- Lines added: {changes_stats.get('additions', '?')}\n"
+            f"- Lines deleted: {changes_stats.get('deletions', '?')}\n"
+        )
+
     return f"""
 You are a senior security engineer conducting a focused security review of a GitLab Merge Request: "{title}"
 
@@ -78,15 +111,12 @@ CONTEXT:
 - Author: {author}
 - Source Branch: {source_branch} → Target Branch: {target_branch}
 - MR Description: {description}
+{stats_lines}
 
 FILES MODIFIED:
 {files_changed_list}
 
-MERGE REQUEST DIFF CONTENT:
-```diff
-{diff_text}
-```
-Review the complete diff above. This contains all code changes in the MR.
+{diff_section}
 
 OBJECTIVE:
 Perform a security-focused code review to identify HIGH-CONFIDENCE security vulnerabilities that could have real exploitation potential. This is not a general code review - focus ONLY on security implications newly added by this MR. Do not comment on existing security concerns.

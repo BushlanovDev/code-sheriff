@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "Code review agent"
 requires-python = ">=3.13"
 dependencies = [
-    "claude-agent-sdk>=0.1.44",
+    "claude-agent-sdk>=0.1.72",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
+    "python-dotenv>=1.0.0",
     "requests>=2.32.5",
 ]
 

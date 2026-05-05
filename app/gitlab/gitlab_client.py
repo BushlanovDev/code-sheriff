@@ -285,9 +285,9 @@ class GitLabClient:
         if not target_file or not target_line:
             return None
 
-        # Find the file in changes
+        # Find the file in changes (match by new_path first, then fall back to old_path)
         for change in changes_data.get("changes", []):
-            if change.get("new_path") == target_file:
+            if change.get("new_path") == target_file or change.get("old_path") == target_file:
                 # Parse diff to find position
                 position = self._parse_diff_position(
                     change.get("diff", ""),
