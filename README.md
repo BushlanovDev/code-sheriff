@@ -1,4 +1,4 @@
-# GitLab Security Review Agent
+# Code Sheriff: Security Review Agent
 
 AI-powered security review agent for GitLab Merge Requests. Uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via `claude-agent-sdk` to analyze code changes for security vulnerabilities with deep semantic understanding.
 
