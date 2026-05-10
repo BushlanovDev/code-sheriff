@@ -1,4 +1,4 @@
-# Code Sheriff: Security Review Agent
+# 🕵🏼‍♂️ Code Sheriff: Security Review Agent
 
 AI-powered security review agent for GitLab Merge Requests. Uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via `claude-agent-sdk` to analyze code changes for security vulnerabilities with deep semantic understanding.
 
@@ -60,18 +60,23 @@ uv run python -m app <project_id> <merge_request_iid>
 
 All settings are loaded from environment variables (or `.env` file).
 
-| Variable                            | Description                                                                    | Default               | Required |
-|-------------------------------------|--------------------------------------------------------------------------------|-----------------------|----------|
-| `GITLAB_API_KEY`                    | GitLab Access Token with `api` scope                                           | None                  | Yes      |
-| `ANTHROPIC_API_KEY`                 | Anthropic Claude API key for security analysis                                 | None                  | Yes      |
-| `CLAUDE_MODEL`                      | Claude model to use                                                            | `claude-opus-4-6`     | No       |
-| `GITLAB_BASE_URL`                   | GitLab instance URL (auto-resolved from `CI_SERVER_URL`)                       | `https://gitlab.com`  | No       |
-| `ENABLE_HARD_EXCLUSIONS`            | Enable regex-based false positive filtering                                    | `true`                | No       |
-| `ENABLE_CLAUDE_FILTERING`           | Enable LLM-based second-stage filtering                                        | `false`               | No       |
-| `EXCLUDE_DIRECTORIES`               | Comma-separated list of directories to exclude                                 | None                  | No       |
-| `CUSTOM_SECURITY_SCAN_INSTRUCTIONS` | Path to `.txt` file with custom security categories to append to audit prompt  | None                  | No       |
-| `CUSTOM_FILTER_INSTRUCTIONS`        | Path to `.txt` file with custom false positive filtering instructions          | None                  | No       |
-| `SKIP_REVIEWED`                     | Skip review if summary for current commit SHA already exists                   | `true`                | No       |
+| Variable                            | Description                                                                   | Default               | Required |
+|-------------------------------------|-------------------------------------------------------------------------------|-----------------------|----------|
+| `GITLAB_API_KEY`                    | GitLab Access Token with `api` scope                                          | None                  | Yes      |
+| `ANTHROPIC_API_KEY`                 | Anthropic Claude API key for security analysis                                | None                  | Yes      |
+| `ANTHROPIC_BASE_URL`                | Anthropic Claude API url                                                      | None                  | No      |
+| `CLAUDE_MODEL`                      | Claude model to use                                                           | `claude-opus-4-6`     | No       |
+| `GITLAB_BASE_URL`                   | GitLab instance URL (auto-resolved from `CI_SERVER_URL`)                      | `https://gitlab.com`  | No       |
+| `ENABLE_HARD_EXCLUSIONS`            | Enable regex-based false positive filtering                                   | `true`                | No       |
+| `ENABLE_CLAUDE_FILTERING`           | Enable LLM-based second-stage filtering                                       | `false`               | No       |
+| `EXCLUDE_DIRECTORIES`               | Comma-separated list of directories to exclude                                | None                  | No       |
+| `CUSTOM_SECURITY_SCAN_INSTRUCTIONS` | Path to `.txt` file with custom security categories to append to audit prompt | None                  | No       |
+| `CUSTOM_FILTER_INSTRUCTIONS`        | Path to `.txt` file with custom false positive filtering instructions         | None                  | No       |
+| `SKIP_REVIEWED`                     | Skip review if summary for current commit SHA already exists                  | `true`                | No       |
+
+> **Note:** You are not required to use the paid Anthropic API. By overriding the `ANTHROPIC_BASE_URL` variable, you can use any 
+compatible API, both cloud and self-hosted.  
+I recommend [Z.AI](https://z.ai/subscribe?ic=ENG25GDKO0).
 
 ## How It Works
 
