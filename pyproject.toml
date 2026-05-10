@@ -1,10 +1,10 @@
 [project]
-name = "gitlab-security-review-agent"
+name = "code-sheriff"
 version = "0.1.0"
 description = "Code review agent"
 requires-python = ">=3.13"
 dependencies = [
-    "claude-agent-sdk>=0.1.72",
+    "claude-agent-sdk>=0.1.80",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.0.0",
@@ -15,7 +15,7 @@ dependencies = [
 package = true
 
 [project.scripts]
-review-agent = "app.main:cli_main"
+code-sheriff = "app.main:cli_main"
 
 [dependency-groups]
 dev = [
@@ -36,7 +36,7 @@ ignore = []
 "app/prompts.py" = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["gitlab_security_review_agent"]
+known-first-party = ["code_sheriff"]
 
 [tool.mypy]
 python_version = "3.13"

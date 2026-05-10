@@ -1,5 +1,5 @@
 services:
-  review-agent:
+  code-sheriff:
     build: .
     env_file: .env
     entrypoint: [ "bash" ]

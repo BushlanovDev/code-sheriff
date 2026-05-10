@@ -22,7 +22,7 @@ Add a job to your `.gitlab-ci.yml`:
 ```yaml
 security-review:
   stage: test
-  image: python:3.13-slim
+  image: ghcr.io/bushlanovdev/code-sheriff:latest
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
@@ -32,11 +32,8 @@ security-review:
     ENABLE_HARD_EXCLUSIONS: "true"
     ENABLE_CLAUDE_FILTERING: "false"
     SKIP_REVIEWED: "true"
-  before_script:
-    - pip install uv
-    - uv sync --frozen
   script:
-    - uv run review-agent
+    - code-sheriff
   allow_failure: true
 ```
 
@@ -51,7 +48,7 @@ cp .env.example .env
 uv sync
 
 # Via entry point
-uv run review-agent <project_id> <merge_request_iid>
+uv run code-sheriff <project_id> <merge_request_iid>
 
 # Or as module
 uv run python -m app <project_id> <merge_request_iid>
