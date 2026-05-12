@@ -12,7 +12,14 @@ from pydantic import ValidationError
 from app import FindingsFilter, get_security_audit_prompt
 from app.claude import Finding, SecurityReviewOutput, get_claude_code_agent
 from app.config import Settings, get_settings
-from app.constants import MAX_PROMPT_SIZE_BYTES, REVIEW_HEADER, SEVERITY_ICONS, ExitCode, Severity
+from app.constants import (
+    CONTEXT_OVERFLOW_PHRASES,
+    MAX_PROMPT_SIZE_BYTES,
+    REVIEW_HEADER,
+    SEVERITY_ICONS,
+    ExitCode,
+    Severity,
+)
 from app.gitlab import GitLabClient
 
 load_dotenv()
@@ -308,8 +315,9 @@ async def main() -> None:
         final_output = await _run_security_audit(claude_code_agent, prompt)
     except Exception as e:
         error_msg = str(e).lower()
-        # If prompt is too long — retry without diff
-        if "prompt is too long" in error_msg or "prompt too long" in error_msg:
+        # If prompt is too long or exceeds context size - retry without diff
+        is_prompt_too_long = any(phrase in error_msg for phrase in CONTEXT_OVERFLOW_PHRASES)
+        if is_prompt_too_long:
             print(f"[Warning] Prompt too long ({prompt_size} bytes), retrying without diff...")
             prompt_without_diff = get_security_audit_prompt(
                 mr_data, changed_files, mr_diff, custom_scan_text, include_diff=False,

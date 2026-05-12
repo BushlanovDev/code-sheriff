@@ -26,8 +26,6 @@ security-review:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
-    GITLAB_API_KEY: $GITLAB_API_KEY
-    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
     CLAUDE_MODEL: "claude-opus-4-6"
     ENABLE_HARD_EXCLUSIONS: "true"
     ENABLE_CLAUDE_FILTERING: "false"
@@ -36,6 +34,8 @@ security-review:
     - code-sheriff
   allow_failure: true
 ```
+
+> **Note:** All settings can be passed through GitLab environment variables (Settings > CI/CD > Variables).
 
 ### Run locally
 

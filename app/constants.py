@@ -43,3 +43,10 @@ GENERATED_MARKERS = (
 )
 
 MAX_PROMPT_SIZE_BYTES = 1024 * 1024  # 1MB
+
+CONTEXT_OVERFLOW_PHRASES = (
+    "prompt is too long",
+    "prompt too long",
+    "exceeds the available context size",
+    "exceeds context size",
+)
