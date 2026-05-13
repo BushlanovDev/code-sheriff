@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from collections import defaultdict
+from importlib.metadata import version as get_version
 from pathlib import Path
 from typing import Any
 
@@ -183,8 +184,13 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
                     if duration > 0:
                         print(f"Tokens per second: {output_tokens / duration:.2f}")
                 else:
+                    result_text = str(getattr(message, "result", "unknown result"))
+                    error_lower = result_text.lower()
+                    is_context_overflow = any(phrase in error_lower for phrase in CONTEXT_OVERFLOW_PHRASES)
+                    if is_context_overflow:
+                        raise RuntimeError(result_text)
                     print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
-                    print(f"❌ Result: {getattr(message, 'result', 'unknown result')}")
+                    print(f"❌ Result: {result_text}")
                     sys.exit(ExitCode.GENERAL_ERROR)
 
     return final_output
@@ -202,6 +208,7 @@ async def main() -> None:
         print(f"Repository directory does not exist: {repo_dir}")
         sys.exit(ExitCode.CONFIGURATION_ERROR)
 
+    print(f"Code Sheriff v{get_version('code-sheriff')} [{settings.claude_model}]")
     print(f"Starting review for Project: {project_id}, merge request: {mr_iid}")
     print(f"Filtering: Hard exclusions={settings.enable_hard_exclusions}, LLM={settings.enable_claude_filtering}\n")
 
