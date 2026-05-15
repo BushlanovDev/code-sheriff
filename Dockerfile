@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -12,7 +12,7 @@ COPY app/ app/
 RUN uv pip install --python /opt/code-sheriff-venv/bin/python .
 
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser
