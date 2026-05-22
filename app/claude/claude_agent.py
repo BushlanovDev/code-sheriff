@@ -123,7 +123,6 @@ def get_claude_filter_agent(model: str) -> ClaudeSDKClient:
         permission_mode="bypassPermissions",
         max_turns=10,
         cwd=Path.cwd(),
-        system_prompt=SystemPromptPreset(type="preset", preset="claude_code"),
         output_format={
             "type": "json_schema",
             "schema": filter_schema,

@@ -89,7 +89,7 @@ def _is_already_reviewed(discussions: list[dict], head_sha: str) -> bool:
     for disc in discussions:
         for note in disc.get("notes", []):
             body = note.get("body", "")
-            if body.startswith(REVIEW_HEADER) and sha_short in body:
+            if REVIEW_HEADER in body and sha_short in body:
                 return True
     return False
 
@@ -407,7 +407,7 @@ async def main() -> None:
     for disc in existing_discussions:
         for note in disc.get("notes", []):
             body = note.get("body", "")
-            if body.startswith(REVIEW_HEADER):
+            if REVIEW_HEADER in body:
                 if summary_note_id is None:
                     summary_note_id = note.get("id")
                 continue
