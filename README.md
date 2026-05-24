@@ -151,6 +151,9 @@ uv run ruff format .
 
 # Type check
 uv run mypy .
+
+# Tests
+uv run --group dev python -m pytes
 ```
 
 ## License

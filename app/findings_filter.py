@@ -356,7 +356,7 @@ class FindingsFilter:
         else:
             # No Claude filtering - keep all findings from hard filter
             for finding in findings_after_hard:
-                enriched_finding = finding.copy()
+                enriched_finding = finding.model_copy()
                 findings_after_claude.append(enriched_finding)
                 stats.kept_findings += 1
 

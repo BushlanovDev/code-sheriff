@@ -5,11 +5,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /src
 
 COPY pyproject.toml uv.lock ./
-RUN uv venv /opt/code-sheriff-venv && \
-    uv pip install --python /opt/code-sheriff-venv/bin/python -r pyproject.toml
+RUN uv venv /opt/code-sheriff-venv
 
 COPY app/ app/
-RUN uv pip install --python /opt/code-sheriff-venv/bin/python .
+RUN UV_PROJECT_ENVIRONMENT=/opt/code-sheriff-venv uv sync --frozen --no-dev
 
 
 FROM python:3.14-slim
