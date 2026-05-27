@@ -1,6 +1,6 @@
 [project]
 name = "code-sheriff"
-version = "0.1.5"
+version = "0.1.6"
 description = "Code Sheriff: Security Review Agent"
 requires-python = ">=3.13"
 dependencies = [
