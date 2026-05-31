@@ -2,27 +2,8 @@
 
 from pathlib import Path
 
-from app.claude import Finding
-from app.constants import Severity
 from app.findings_filter import FindingsFilter
-
-
-def _make_finding(
-    description: str = "SQL injection",
-    category: str = "sql_injection",
-    file: str = "app/server.py",
-    severity: Severity = Severity.HIGH,
-) -> Finding:
-    return Finding(
-        file=file,
-        line=1,
-        severity=severity,
-        category=category,
-        description=description,
-        exploit_scenario="n/a",
-        recommendation="n/a",
-        confidence=0.9,
-    )
+from tests.helpers import make_finding
 
 
 class TestFilterFindingsEmpty:
@@ -30,7 +11,7 @@ class TestFilterFindingsEmpty:
         f = FindingsFilter(model="test", use_hard_exclusions=True, use_claude_filtering=False)
         success, results, stats = await f.filter_findings([])
         assert success is True
-        assert results["filtered_findings"] == []
+        assert results.filtered_findings == []
         assert stats.total_findings == 0
 
     async def test_stats_zero_runtime(self):
@@ -42,27 +23,27 @@ class TestFilterFindingsEmpty:
 class TestHardExclusionFiltering:
     async def test_dos_finding_excluded(self):
         f = FindingsFilter(model="test", use_hard_exclusions=True, use_claude_filtering=False)
-        findings = [_make_finding(description="Denial of service attack")]
+        findings = [make_finding(description="Denial of service attack")]
         success, results, stats = await f.filter_findings(findings)
         assert success is True
-        assert len(results["filtered_findings"]) == 0
+        assert len(results.filtered_findings) == 0
         assert stats.hard_excluded == 1
 
     async def test_real_finding_kept(self):
         f = FindingsFilter(model="test", use_hard_exclusions=True, use_claude_filtering=False)
-        findings = [_make_finding(description="SQL injection in login query")]
+        findings = [make_finding(description="SQL injection in login query")]
         success, results, stats = await f.filter_findings(findings)
         assert success is True
-        assert len(results["filtered_findings"]) == 1
+        assert len(results.filtered_findings) == 1
         assert stats.kept_findings == 1
 
     async def test_mixed_findings(self):
         f = FindingsFilter(model="test", use_hard_exclusions=True, use_claude_filtering=False)
         findings = [
-            _make_finding(description="SQL injection"),
-            _make_finding(description="Denial of service attack"),
-            _make_finding(description="Hardcoded API key found"),
-            _make_finding(description="Missing rate limit"),
+            make_finding(description="SQL injection"),
+            make_finding(description="Denial of service attack"),
+            make_finding(description="Hardcoded API key found"),
+            make_finding(description="Missing rate limit"),
         ]
         success, results, stats = await f.filter_findings(findings)
         assert success is True
@@ -75,12 +56,12 @@ class TestNoHardExclusions:
     async def test_all_kept_when_disabled(self):
         f = FindingsFilter(model="test", use_hard_exclusions=False, use_claude_filtering=False)
         findings = [
-            _make_finding(description="Denial of service attack"),
-            _make_finding(description="Missing rate limit"),
+            make_finding(description="Denial of service attack"),
+            make_finding(description="Missing rate limit"),
         ]
         success, results, stats = await f.filter_findings(findings)
         assert success is True
-        assert len(results["filtered_findings"]) == 2
+        assert len(results.filtered_findings) == 2
         assert stats.hard_excluded == 0
         assert stats.kept_findings == 2
 
@@ -89,22 +70,22 @@ class TestFilterStats:
     async def test_exclusion_breakdown(self):
         f = FindingsFilter(model="test", use_hard_exclusions=True, use_claude_filtering=False)
         findings = [
-            _make_finding(description="Denial of service via large payload"),
-            _make_finding(description="Resource exhaustion attack"),
+            make_finding(description="Denial of service via large payload"),
+            make_finding(description="Resource exhaustion attack"),
         ]
         _, _, stats = await f.filter_findings(findings)
         assert len(stats.exclusion_breakdown) > 0
 
     async def test_analysis_summary_structure(self):
         f = FindingsFilter(model="test", use_hard_exclusions=True, use_claude_filtering=False)
-        findings = [_make_finding()]
+        findings = [make_finding()]
         _, results, _ = await f.filter_findings(findings)
-        summary = results["analysis_summary"]
-        assert "total_findings" in summary
-        assert "kept_findings" in summary
-        assert "excluded_findings" in summary
-        assert "hard_excluded" in summary
-        assert "runtime_seconds" in summary
+        summary = results.analysis_summary
+        assert summary.total_findings >= 0
+        assert summary.kept_findings >= 0
+        assert summary.excluded_findings >= 0
+        assert summary.hard_excluded >= 0
+        assert summary.runtime_seconds >= 0.0
 
 
 class TestReadFile:

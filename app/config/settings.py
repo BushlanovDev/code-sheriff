@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     claude_filtering_model: str | None = Field(default=None, description="Claude model for filtering")
 
     enable_hard_exclusions: bool = Field(default=True, description="Enable hard exclusions")
+    exclude_directories: list[str] | str = Field(default_factory=list, description="Excluded directories")
     enable_claude_filtering: bool = Field(default=False, description="Enable llm filtering")
-    exclude_directories: list[str] | Any = Field(default_factory=list, description="Excluded directories")
     custom_filter_instructions: str | None = Field(
         default=None,
         description="Path to custom false positive filtering instructions text file",
@@ -48,9 +48,7 @@ class Settings(BaseSettings):
     @classmethod
     def resolve_gitlab_base_url_from_ci(cls, data: dict) -> dict:
         """Resolve gitlab_base_url from CI_SERVER_URL if not set."""
-        if isinstance(data, dict):
-            # Only set if not already provided
-            if "gitlab_base_url" not in data or data["gitlab_base_url"] is None:
+        if isinstance(data, dict) and ("gitlab_base_url" not in data or data["gitlab_base_url"] is None):
                 ci_server_url = data.get("ci_server_url")
                 if ci_server_url:
                     data["gitlab_base_url"] = ci_server_url

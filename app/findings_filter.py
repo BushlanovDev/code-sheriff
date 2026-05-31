@@ -1,11 +1,9 @@
-"""Findings filter for reducing false positives in security audit results."""
-
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from re import Pattern
-from typing import Any
+from typing import Any, ClassVar
 
 from app.claude import Finding
 from app.prompts import get_filtering_prompt
@@ -28,24 +26,51 @@ class FilterStats:
     total_output_tokens: int = 0
 
 
+@dataclass
+class FilterAnalysisSummary:
+    """Summary statistics from the filtering process."""
+
+    total_findings: int = 0
+    kept_findings: int = 0
+    excluded_findings: int = 0
+    hard_excluded: int = 0
+    claude_excluded: int = 0
+    exclusion_breakdown: dict[str, int] = field(default_factory=dict)
+    average_confidence: float | None = None
+    runtime_seconds: float = 0.0
+    total_cost_usd: float = 0.0
+    total_duration_api_seconds: float = 0.0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+
+
+@dataclass
+class FilteredResults:
+    """Typed result of the filtering pipeline."""
+
+    filtered_findings: list[Finding]
+    excluded_findings: list[dict[str, Any]]
+    analysis_summary: FilterAnalysisSummary
+
+
 class HardExclusionRules:
     """Hard exclusion rules for common false positives."""
 
     # Pre-compiled regex patterns for better performance
-    _DOS_PATTERNS: list[Pattern] = [
+    _DOS_PATTERNS: ClassVar[list[Pattern[str]]] = [
         re.compile(r"\b(denial of service|dos attack|resource exhaustion)\b", re.IGNORECASE),
         re.compile(r"\b(exhaust|overwhelm|overload).*?(resource|memory|cpu)\b", re.IGNORECASE),
         re.compile(r"\b(infinite|unbounded).*?(loop|recursion)\b", re.IGNORECASE),
     ]
 
-    _RATE_LIMITING_PATTERNS: list[Pattern] = [
+    _RATE_LIMITING_PATTERNS: ClassVar[list[Pattern[str]]] = [
         re.compile(r"\b(missing|lack of|no)\s+rate\s+limit", re.IGNORECASE),
         re.compile(r"\brate\s+limiting\s+(missing|required|not implemented)", re.IGNORECASE),
         re.compile(r"\b(implement|add)\s+rate\s+limit", re.IGNORECASE),
         re.compile(r"\bunlimited\s+(requests|calls|api)", re.IGNORECASE),
     ]
 
-    _RESOURCE_PATTERNS: list[Pattern] = [
+    _RESOURCE_PATTERNS: ClassVar[list[Pattern[str]]] = [
         re.compile(r"\b(resource|memory|file)\s+leak\s+potential", re.IGNORECASE),
         re.compile(r"\bunclosed\s+(resource|file|connection)", re.IGNORECASE),
         re.compile(r"\b(close|cleanup|release)\s+(resource|file|connection)", re.IGNORECASE),
@@ -53,13 +78,13 @@ class HardExclusionRules:
         re.compile(r"\b(database|thread|socket|connection)\s+leak", re.IGNORECASE),
     ]
 
-    _OPEN_REDIRECT_PATTERNS: list[Pattern] = [
+    _OPEN_REDIRECT_PATTERNS: ClassVar[list[Pattern[str]]] = [
         re.compile(r"\b(open redirect|unvalidated redirect)\b", re.IGNORECASE),
         re.compile(r"\b(redirect.(attack|exploit|vulnerability))\b", re.IGNORECASE),
         re.compile(r"\b(malicious.redirect)\b", re.IGNORECASE),
     ]
 
-    _MEMORY_SAFETY_PATTERNS: list[Pattern] = [
+    _MEMORY_SAFETY_PATTERNS: ClassVar[list[Pattern[str]]] = [
         re.compile(r"\b(buffer overflow|stack overflow|heap overflow)\b", re.IGNORECASE),
         re.compile(r"\b(oob)\s+(read|write|access)\b", re.IGNORECASE),
         re.compile(r"\b(out.?of.?bounds?)\b", re.IGNORECASE),
@@ -71,13 +96,13 @@ class HardExclusionRules:
         re.compile(r"\barbitrary.?(memory read|pointer dereference|memory address|memory pointer)\b", re.IGNORECASE),
     ]
 
-    _REGEX_INJECTION: list[Pattern] = [
+    _REGEX_INJECTION: ClassVar[list[Pattern[str]]] = [
         re.compile(r"\b(regex|regular expression)\s+injection\b", re.IGNORECASE),
         re.compile(r"\b(regex|regular expression)\s+denial of service\b", re.IGNORECASE),
         re.compile(r"\b(regex|regular expression)\s+flooding\b", re.IGNORECASE),
     ]
 
-    _SSRF_PATTERNS: list[Pattern] = [
+    _SSRF_PATTERNS: ClassVar[list[Pattern[str]]] = [
         re.compile(r"\b(ssrf|server\s+.?side\s+.?request\s+.?forgery)\b", re.IGNORECASE),
     ]
 
@@ -134,9 +159,7 @@ class HardExclusionRules:
 
         # Check memory safety patterns - exclude if NOT in C/C++ files
         c_cpp_extensions = {".c", ".cc", ".cpp", ".h"}
-        file_ext = ""
-        if "." in file_path:
-            file_ext = f".{file_path.lower().split('.')[-1]}"
+        file_ext = Path(file_path).suffix.lower()
 
         # If file doesn't have a C/C++ extension (including no extension), exclude memory safety findings
         if file_ext not in c_cpp_extensions:
@@ -200,10 +223,10 @@ class FindingsFilter:
                 return False, "", f"Path is not a file: {path}"
 
             try:
-                with open(path, encoding="utf-8") as f:
+                with path.open(encoding="utf-8") as f:
                     content = f.read()
             except UnicodeDecodeError:
-                with open(path, encoding="latin-1") as f:
+                with path.open(encoding="latin-1") as f:
                     content = f.read()
             return True, content, ""
         except Exception as e:
@@ -211,7 +234,7 @@ class FindingsFilter:
 
     async def filter_findings(
         self, findings: list[Finding], mr_context: dict[str, Any] | None = None
-    ) -> tuple[bool, dict[str, Any], FilterStats]:
+    ) -> tuple[bool, FilteredResults, FilterStats]:
         """Filter security findings to remove false positives.
 
         Args:
@@ -227,16 +250,11 @@ class FindingsFilter:
             stats = FilterStats(total_findings=0, runtime_seconds=0.0)
             return (
                 True,
-                {
-                    "filtered_findings": [],
-                    "excluded_findings": [],
-                    "analysis_summary": {
-                        "total_findings": 0,
-                        "kept_findings": 0,
-                        "excluded_findings": 0,
-                        "exclusion_breakdown": {},
-                    },
-                },
+                FilteredResults(
+                    filtered_findings=[],
+                    excluded_findings=[],
+                    analysis_summary=FilterAnalysisSummary(),
+                ),
                 stats,
             )
 
@@ -343,11 +361,11 @@ class FindingsFilter:
                             )
                             stats.claude_excluded += 1
                         else:
-                            findings_after_claude.append(finding.copy())
+                            findings_after_claude.append(finding.model_copy())
                             stats.kept_findings += 1
                     else:
                         print(f"LLM returned no result for finding in {finding.file}:{finding.line}")
-                        findings_after_claude.append(finding.copy())
+                        findings_after_claude.append(finding.model_copy())
                         stats.kept_findings += 1
                 except Exception as e:
                     print(f"Error querying filter agent for finding {finding.file}:{finding.line} - {e}")
@@ -367,26 +385,26 @@ class FindingsFilter:
         stats.runtime_seconds = time.time() - start_time
 
         # Build filtered results
-        filtered_results = {
-            "filtered_findings": findings_after_claude,
-            "excluded_findings": all_excluded,
-            "analysis_summary": {
-                "total_findings": stats.total_findings,
-                "kept_findings": stats.kept_findings,
-                "excluded_findings": len(all_excluded),
-                "hard_excluded": stats.hard_excluded,
-                "claude_excluded": stats.claude_excluded,
-                "exclusion_breakdown": stats.exclusion_breakdown,
-                "average_confidence": sum(stats.confidence_scores) / len(stats.confidence_scores)
+        filtered_results = FilteredResults(
+            filtered_findings=findings_after_claude,
+            excluded_findings=all_excluded,
+            analysis_summary=FilterAnalysisSummary(
+                total_findings=stats.total_findings,
+                kept_findings=stats.kept_findings,
+                excluded_findings=len(all_excluded),
+                hard_excluded=stats.hard_excluded,
+                claude_excluded=stats.claude_excluded,
+                exclusion_breakdown=stats.exclusion_breakdown,
+                average_confidence=sum(stats.confidence_scores) / len(stats.confidence_scores)
                 if stats.confidence_scores
                 else None,
-                "runtime_seconds": stats.runtime_seconds,
-                "total_cost_usd": stats.total_cost_usd,
-                "total_duration_api_seconds": stats.total_duration_api_seconds,
-                "total_input_tokens": stats.total_input_tokens,
-                "total_output_tokens": stats.total_output_tokens,
-            },
-        }
+                runtime_seconds=stats.runtime_seconds,
+                total_cost_usd=stats.total_cost_usd,
+                total_duration_api_seconds=stats.total_duration_api_seconds,
+                total_input_tokens=stats.total_input_tokens,
+                total_output_tokens=stats.total_output_tokens,
+            ),
+        )
 
         print(
             f"✅ Filtering completed: {stats.kept_findings}/{stats.total_findings} "

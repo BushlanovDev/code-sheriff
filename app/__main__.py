@@ -1,6 +1,4 @@
-import asyncio
-
-from app.main import main
+from app.main import cli_main
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    cli_main()

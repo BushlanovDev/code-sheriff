@@ -1,9 +1,32 @@
 """Tests for Settings — validation, parsing, and defaults."""
 
+import os
+
 import pytest
 from pydantic import ValidationError
 
 from app.config.settings import Settings
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch):
+    """Prevent locally loaded .env from leaking into tests."""
+    for key in list(os.environ.keys()):
+        if key.startswith("CI_") or key in (
+            "GITLAB_API_KEY",
+            "GITLAB_BASE_URL",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_BASE_URL",
+            "CLAUDE_MODEL",
+            "CLAUDE_FILTERING_MODEL",
+            "ENABLE_HARD_EXCLUSIONS",
+            "ENABLE_CLAUDE_FILTERING",
+            "EXCLUDE_DIRECTORIES",
+            "CUSTOM_FILTER_INSTRUCTIONS",
+            "CUSTOM_SECURITY_SCAN_INSTRUCTIONS",
+            "SKIP_REVIEWED",
+        ):
+            monkeypatch.delenv(key, raising=False)
 
 
 def _settings(**kwargs) -> Settings:

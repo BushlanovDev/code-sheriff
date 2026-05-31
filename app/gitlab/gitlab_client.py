@@ -1,40 +1,46 @@
 import re
 import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from urllib.parse import quote
 
 import requests
 
 from app.claude import Finding
 from app.constants import GENERATED_MARKERS
+from app.gitlab.models import DiffPosition, Discussion, MergeRequestData, MRChangesData
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+DEFAULT_TIMEOUT = 30  # seconds
 
 
-def _retry_on_rate_limit(max_retries: int = 3, delay: int = 2):
+def _retry_on_rate_limit(max_retries: int = 3, delay: int = 2) -> Callable[[F], F]:
     """Decorator to retry on 429 rate limit responses."""
 
-    def decorator(func):
+    def decorator(func: F) -> F:
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
                 except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        wait_time = delay * (2 ** attempt)
+                    if e.response is not None and e.response.status_code == 429:
+                        wait_time = delay * (2**attempt)
                         print(f"Rate limited, waiting {wait_time}s...")
                         time.sleep(wait_time)
                     else:
                         raise
             raise Exception("Max retries exceeded due to rate limiting")
 
-        return wrapper
+        return cast(F, wrapper)
 
     return decorator
 
 
 class GitLabClient:
-    def __init__(self, base_url: str, token: str, excluded_dirs: list[str] | None = None):
+    def __init__(self, base_url: str, token: str, excluded_dirs: list[str] | None = None) -> None:
         """Initialize the GitLab API client.
 
         Args:
@@ -47,10 +53,11 @@ class GitLabClient:
         self.excluded_dirs: list[str] = excluded_dirs or []
 
         self.api_url: str = f"{self.base_url}/api/v4"
-        self.headers = {
+        self._session: requests.Session = requests.Session()
+        self._session.headers.update({
             "PRIVATE-TOKEN": self.token,
             "Accept": "application/json",
-        }
+        })
 
     def _get_project_id(self, project_id: str) -> str:
         """URL encode the project ID if it's a project path (e.g. namespace/repo)."""
@@ -58,7 +65,7 @@ class GitLabClient:
 
     def _parse_diff_position(
         self, diff: str, target_line: int, old_path: str, new_path: str, base_sha: str, head_sha: str, start_sha: str
-    ) -> dict[str, Any] | None:
+    ) -> DiffPosition | None:
         """Parse diff to find position dict for a target line number.
 
         Args:
@@ -87,15 +94,15 @@ class GitLabClient:
                     # This is an added line in new version
                     if current_new_line == target_line:
                         # Found our target line!
-                        return {
-                            "base_sha": base_sha,
-                            "head_sha": head_sha,
-                            "start_sha": start_sha,
-                            "old_path": old_path,
-                            "new_path": new_path,
-                            "position_type": "text",
-                            "new_line": target_line,
-                        }
+                        return DiffPosition(
+                            base_sha=base_sha,
+                            head_sha=head_sha,
+                            start_sha=start_sha,
+                            old_path=old_path,
+                            new_path=new_path,
+                            position_type="text",
+                            new_line=target_line,
+                        )
                     current_new_line += 1
                 elif not line.startswith("-"):
                     # Context line - also counts
@@ -103,14 +110,11 @@ class GitLabClient:
 
         return None
 
-    def _is_excluded(self, filepath: str) -> bool:
+    def is_excluded(self, filepath: str) -> bool:
         """Check if a file should be excluded based on directory patterns."""
         for excluded_dir in self.excluded_dirs:
             # Normalize excluded directory (remove leading ./ if present)
-            if excluded_dir.startswith("./"):
-                normalized_excluded = excluded_dir[2:]
-            else:
-                normalized_excluded = excluded_dir
+            normalized_excluded = excluded_dir[2:] if excluded_dir.startswith("./") else excluded_dir
 
             # Check if file starts with excluded directory
             if filepath.startswith(excluded_dir + "/"):
@@ -125,19 +129,19 @@ class GitLabClient:
         return False
 
     @_retry_on_rate_limit()
-    def get_merge_request(self, project_id: str, mr_iid: int) -> dict[str, Any]:
+    def get_merge_request(self, project_id: str, mr_iid: int) -> MergeRequestData:
         """Fetch metadata for a specific Merge Request.
 
         GET /api/v4/projects/{id}/merge_requests/{mr_iid}
         """
         url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}"
-        response = requests.get(url, headers=self.headers)
+        response = self._session.get(url, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
 
-        return cast(dict[str, Any], response.json())
+        return cast(MergeRequestData, response.json())
 
     @_retry_on_rate_limit()
-    def get_merge_request_changes(self, project_id: str, mr_iid: int) -> dict[str, Any]:
+    def get_merge_request_changes(self, project_id: str, mr_iid: int) -> MRChangesData:
         """Fetch the diff and SHA references for a specific MR.
 
         Returns dict with 'changes' list and 'diff_refs' dict containing
@@ -146,18 +150,18 @@ class GitLabClient:
         GET /api/v4/projects/{id}/merge_requests/{mr_iid}/changes
         """
         url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/changes"
-        response = requests.get(url, headers=self.headers)
+        response = self._session.get(url, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
 
-        return cast(dict[str, Any], response.json())
+        return cast(MRChangesData, response.json())
 
-    def _is_generated(self, diff_content: str) -> bool:
+    def is_generated(self, diff_content: str) -> bool:
         """Check if a diff section belongs to a generated file."""
         # Check only first ~20 lines of diff for markers (header area)
         header = "\n".join(diff_content.split("\n")[:20])
         return any(marker in header for marker in GENERATED_MARKERS)
 
-    def format_merge_request_diff(self, changes_data: dict[str, Any]) -> str:
+    def format_merge_request_diff(self, changes_data: MRChangesData) -> str:
         """Format GitLab MR changes diff into unified diff string.
 
         Args:
@@ -171,13 +175,13 @@ class GitLabClient:
             old_path = file.get("old_path", "")
             new_path = file.get("new_path", "")
 
-            if (old_path and self._is_excluded(old_path)) or (new_path and self._is_excluded(new_path)):
+            if (old_path and self.is_excluded(old_path)) or (new_path and self.is_excluded(new_path)):
                 continue
 
             diff = file.get("diff", "")
 
             # Skip generated files
-            if self._is_generated(diff):
+            if self.is_generated(diff):
                 print(f"[Debug] Filtering out generated file: {new_path or old_path}")
                 continue
 
@@ -189,7 +193,7 @@ class GitLabClient:
 
     @_retry_on_rate_limit()
     def create_merge_request_discussion(
-        self, project_id: str, mr_iid: int, position: dict[str, Any], body: str
+        self, project_id: str, mr_iid: int, position: DiffPosition, body: str
     ) -> dict[str, Any]:
         """Create an inline discussion on a specific line.
 
@@ -203,11 +207,11 @@ class GitLabClient:
             body: Discussion body text (markdown)
         """
         url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/discussions"
-        payload = {
+        payload: dict[str, Any] = {
             "body": body,
             "position": position,
         }
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = self._session.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
 
         return cast(dict[str, Any], response.json())
@@ -220,36 +224,38 @@ class GitLabClient:
         """
         url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/notes"
         payload = {"body": body}
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = self._session.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
 
         return cast(dict[str, Any], response.json())
 
     @_retry_on_rate_limit()
-    def update_merge_request_note(self, project_id: str, mr_iid: int, note_id: int, body: str) -> dict[str, Any]:
+    def update_merge_request_note(
+        self, project_id: str, mr_iid: int, note_id: int, body: str
+    ) -> dict[str, Any]:
         """Update a general note/comment on a Merge Request.
 
         PUT /api/v4/projects/{id}/merge_requests/{mr_iid}/notes/{note_id}
         """
         url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/notes/{note_id}"
         payload = {"body": body}
-        response = requests.put(url, headers=self.headers, json=payload)
+        response = self._session.put(url, json=payload, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
 
         return cast(dict[str, Any], response.json())
 
     @_retry_on_rate_limit()
-    def get_merge_request_discussions(self, project_id: str, mr_iid: int) -> list[dict[str, Any]]:
+    def get_merge_request_discussions(self, project_id: str, mr_iid: int) -> list[Discussion]:
         """Fetch all discussions for a specific Merge Request.
 
         GET /api/v4/projects/{id}/merge_requests/{mr_iid}/discussions
         """
-        discussions = []
+        discussions: list[Discussion] = []
         url = f"{self.api_url}/projects/{self._get_project_id(project_id)}/merge_requests/{mr_iid}/discussions"
         page = 1
         while True:
             params = {"page": page, "per_page": 100}
-            response = requests.get(url, headers=self.headers, params=params)
+            response = self._session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
 
             data = response.json()
@@ -264,7 +270,7 @@ class GitLabClient:
 
         return discussions
 
-    def build_position_for_issue(self, changes_data: dict[str, Any], finding: Finding) -> dict[str, Any] | None:
+    def build_position_for_issue(self, changes_data: MRChangesData, finding: Finding) -> DiffPosition | None:
         """Build GitLab discussion position for a security issue.
 
         Args:
@@ -275,9 +281,9 @@ class GitLabClient:
             Position dict for GitLab API, or None if position cannot be determined
         """
         diff_refs = changes_data.get("diff_refs", {})
-        base_sha = diff_refs.get("base_sha")
-        head_sha = diff_refs.get("head_sha")
-        start_sha = diff_refs.get("start_sha")
+        base_sha = diff_refs.get("base_sha", "")
+        head_sha = diff_refs.get("head_sha", "")
+        start_sha = diff_refs.get("start_sha", "")
 
         target_file = finding.file
         target_line = finding.line
@@ -292,8 +298,8 @@ class GitLabClient:
                 position = self._parse_diff_position(
                     change.get("diff", ""),
                     target_line,
-                    change.get("old_path"),
-                    change.get("new_path"),
+                    change.get("old_path", ""),
+                    change.get("new_path", ""),
                     base_sha,
                     head_sha,
                     start_sha,

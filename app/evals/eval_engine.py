@@ -5,6 +5,7 @@ worktrees, and runs the full Code Sheriff pipeline programmatically.
 """
 
 import asyncio
+import contextlib
 import os
 import shutil
 import subprocess
@@ -13,7 +14,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # ── Timeout constants (seconds) ─────────────────────────────────
 
@@ -78,7 +79,7 @@ class EvaluationEngine:
         verbose: bool = False,
     ):
         if work_dir is None:
-            work_dir = os.path.expanduser("~/code/audit")
+            work_dir = str(Path("~/code/audit").expanduser())
         self.work_dir = work_dir
         Path(self.work_dir).mkdir(parents=True, exist_ok=True)
 
@@ -113,7 +114,7 @@ class EvaluationEngine:
 
     def _clean_worktrees(self, repo_path: str, branch_pattern: str | None = None) -> None:
         """Prune stale/locked worktrees and matching branches."""
-        if not os.path.exists(repo_path):
+        if not Path(repo_path).exists():
             return
 
         try:
@@ -159,7 +160,7 @@ class EvaluationEngine:
                             ["git", "-C", repo_path, "worktree", "remove", "--force", wt["path"]],
                             check=False, capture_output=True, timeout=TIMEOUT_SHORT,
                         )
-                        if os.path.exists(wt["path"]):
+                        if Path(wt["path"]).exists():
                             shutil.rmtree(wt["path"], ignore_errors=True)
                     except Exception as e:
                         self.log(f"Error removing worktree {wt.get('path')}: {e}")
@@ -197,13 +198,13 @@ class EvaluationEngine:
         """
         project_id = test_case.project_id
         safe_name = project_id.replace("/", "_")
-        base_repo_path = os.path.join(self.work_dir, safe_name)
+        base_repo_path = str(Path(self.work_dir) / safe_name)
 
         repo_lock = self._get_repo_lock(project_id)
 
         with repo_lock:
             # Clone if needed
-            if not os.path.exists(base_repo_path):
+            if not Path(base_repo_path).exists():
                 self.log(f"Cloning {project_id} to {base_repo_path}")
                 clone_url = f"{self.gitlab_base_url}/{project_id}.git"
                 if self.gitlab_token:
@@ -225,7 +226,7 @@ class EvaluationEngine:
             self._clean_worktrees(base_repo_path, eval_prefix)
 
             eval_branch = self._get_eval_branch_name(test_case)
-            worktree_path = os.path.join(self.work_dir, f"{safe_name}_mr{test_case.mr_iid}_{int(time.time())}")
+            worktree_path = str(Path(self.work_dir) / f"{safe_name}_mr{test_case.mr_iid}_{int(time.time())}")
 
             try:
                 # Fetch MR head (GitLab pattern)
@@ -252,23 +253,21 @@ class EvaluationEngine:
             except subprocess.CalledProcessError as e:
                 error = f"Failed to set up worktree: {e.stderr.decode()}"
                 self.log(error)
-                if os.path.exists(worktree_path):
+                if Path(worktree_path).exists():
                     shutil.rmtree(worktree_path, ignore_errors=True)
-                try:
+                with contextlib.suppress(Exception):
                     subprocess.run(
                         ["git", "-C", base_repo_path, "worktree", "remove", "--force", worktree_path],
                         check=False, capture_output=True, timeout=TIMEOUT_SHORT,
                     )
-                except Exception:
-                    pass
                 return False, "", error
 
     def _cleanup_worktree(self, test_case: EvalCase, worktree_path: str) -> None:
-        if not os.path.exists(worktree_path):
+        if not Path(worktree_path).exists():
             return
 
         safe_name = test_case.project_id.replace("/", "_")
-        base_repo_path = os.path.join(self.work_dir, safe_name)
+        base_repo_path = str(Path(self.work_dir) / safe_name)
 
         with self._get_repo_lock(test_case.project_id):
             try:
@@ -276,7 +275,7 @@ class EvaluationEngine:
                     ["git", "-C", base_repo_path, "worktree", "remove", "--force", worktree_path],
                     check=False, capture_output=True, timeout=TIMEOUT_WORKTREE,
                 )
-                if os.path.exists(worktree_path):
+                if Path(worktree_path).exists():
                     shutil.rmtree(worktree_path, ignore_errors=True)
                 self.log(f"Cleaned up worktree: {worktree_path}")
             except Exception as e:
@@ -340,7 +339,7 @@ class EvaluationEngine:
         gitlab_client = GitLabClient(
             base_url=settings.gitlab_base_url,
             token=self.gitlab_token,
-            excluded_dirs=settings.exclude_directories,
+            excluded_dirs=cast(list[str], settings.exclude_directories),
         )
 
         # Get MR data
@@ -353,12 +352,12 @@ class EvaluationEngine:
         for change in mr_changes.get("changes", []):
             new_path = change.get("new_path", "")
             old_path = change.get("old_path", "")
-            if (new_path and gitlab_client._is_excluded(new_path)) or (
-                old_path and gitlab_client._is_excluded(old_path)
+            if (new_path and gitlab_client.is_excluded(new_path)) or (
+                old_path and gitlab_client.is_excluded(old_path)
             ):
                 continue
             diff = change.get("diff", "")
-            if gitlab_client._is_generated(diff):
+            if gitlab_client.is_generated(diff):
                 continue
             changed_files.append(new_path or old_path)
 
@@ -392,8 +391,11 @@ class EvaluationEngine:
         async with claude_agent:
             await claude_agent.query(prompt)
             async for message in claude_agent.receive_response():
-                if isinstance(message, ResultMessage):
-                    if message.subtype == "success" and message.structured_output is not None:
+                if (
+                    isinstance(message, ResultMessage)
+                    and message.subtype == "success"
+                    and message.structured_output is not None
+                ):
                         from pydantic import ValidationError
                         try:
                             final_output = SecurityReviewOutput.model_validate(message.structured_output)

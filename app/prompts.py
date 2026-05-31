@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from app.gitlab.models import MergeRequestData
+
 _DEFAULT_FILTERING_INSTRUCTIONS = """\
 HARD EXCLUSIONS - Automatically exclude findings matching these patterns:
 1. Denial of Service (DOS) vulnerabilities or resource exhaustion attacks
@@ -49,7 +51,7 @@ PRECEDENTS -
 
 
 def get_security_audit_prompt(
-    mr_data: dict[str, Any],
+    mr_data: MergeRequestData | dict[str, Any],
     changed_files: list[str],
     diff_text: str,
     custom_scan_instructions: str | None = None,

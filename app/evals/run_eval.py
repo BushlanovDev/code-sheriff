@@ -126,7 +126,7 @@ def main() -> None:
     safe_name = project_part.replace("/", "_")
     result_file = output_path / f"mr_{safe_name}_{mr_iid}.json"
 
-    with open(result_file, "w") as fp:
+    with result_file.open("w") as fp:
         json.dump(result.to_dict(), fp, indent=2)
 
     print(f"Result saved to: {result_file}")

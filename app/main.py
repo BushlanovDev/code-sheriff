@@ -3,7 +3,7 @@ import sys
 from collections import defaultdict
 from importlib.metadata import version as get_version
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import requests
 from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage
@@ -22,6 +22,7 @@ from app.constants import (
     Severity,
 )
 from app.gitlab import GitLabClient
+from app.gitlab.models import Discussion, MergeRequestData
 
 load_dotenv()
 
@@ -55,6 +56,9 @@ def _merge_request_param(settings: Settings) -> tuple[str, int]:
             print("Usage: python main.py <project_id> <merge_request_iid>")
             sys.exit(ExitCode.CONFIGURATION_ERROR)
 
+    # After the check above, both values are guaranteed to be non-None
+    assert project_id is not None
+    assert mr_iid is not None
     return project_id, int(mr_iid)
 
 
@@ -81,7 +85,7 @@ def _get_tool_summary(name: str, block_input: dict[str, Any]) -> str:
             return "..."
 
 
-def _is_already_reviewed(discussions: list[dict], head_sha: str) -> bool:
+def _is_already_reviewed(discussions: list[Discussion], head_sha: str) -> bool:
     """Check if a review summary note already exists for this commit SHA."""
     if not head_sha:
         return False
@@ -94,10 +98,8 @@ def _is_already_reviewed(discussions: list[dict], head_sha: str) -> bool:
     return False
 
 
-def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: dict | None = None) -> str:
+def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: MergeRequestData | None = None) -> str:
     """Format the JSON review result into a nice GitLab Markdown string."""
-    # score = result.get('overallScore', 0)
-    # summary = result.get('summary', 'No summary provided.')
     findings = result.findings
     analysis_summary = result.analysis_summary
 
@@ -123,7 +125,7 @@ def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: dict | Non
 
     md += f"### 📊 Issues Found ({len(findings)})\n\n"
 
-    categorized_findings: dict[Severity, list] = defaultdict(list)
+    categorized_findings: dict[Severity, list[Finding]] = defaultdict(list)
     for finding in findings:
         categorized_findings[finding.severity].append(finding)
 
@@ -215,7 +217,7 @@ async def main() -> None:
     gitlab_client = GitLabClient(
         base_url=settings.gitlab_base_url,
         token=settings.gitlab_api_key.get_secret_value(),
-        excluded_dirs=settings.exclude_directories,
+        excluded_dirs=cast(list[str], settings.exclude_directories),
     )
 
     print("Getting merge request info...")
@@ -231,7 +233,7 @@ async def main() -> None:
         sys.exit(ExitCode.SUCCESS)
 
     # Fetch existing discussions early (used for caching and later for duplicate check)
-    existing_discussions: list[dict] = []
+    existing_discussions: list[Discussion] = []
     try:
         existing_discussions = gitlab_client.get_merge_request_discussions(project_id, mr_iid)
     except Exception as e:
@@ -261,10 +263,10 @@ async def main() -> None:
     for change in mr_changes.get("changes", []):
         old_path = change.get("old_path", "")
         new_path = change.get("new_path", "")
-        if (old_path and gitlab_client._is_excluded(old_path)) or (new_path and gitlab_client._is_excluded(new_path)):
+        if (old_path and gitlab_client.is_excluded(old_path)) or (new_path and gitlab_client.is_excluded(new_path)):
             continue
         diff = change.get("diff", "")
-        if gitlab_client._is_generated(diff):
+        if gitlab_client.is_generated(diff):
             continue
         if new_path:
             changed_files.append(new_path)
@@ -365,15 +367,15 @@ async def main() -> None:
             )
 
             if filter_success:
-                final_output.findings = filtered_results["filtered_findings"]
+                final_output.findings = filtered_results.filtered_findings
                 removed_count = original_finding_count - stats.kept_findings
                 print(
                     f"Filtered: {removed_count} findings removed ({stats.hard_excluded} hard rules, "
                     f"{stats.claude_excluded} LLM)"
                 )
 
-                if filtered_results["analysis_summary"].get("average_confidence"):
-                    avg_conf = filtered_results["analysis_summary"]["average_confidence"]
+                if filtered_results.analysis_summary.average_confidence:
+                    avg_conf = filtered_results.analysis_summary.average_confidence
                     print(f"Average confidence: {avg_conf:.2f}")
             else:
                 print("[Warning] Filtering failed, continuing with unfiltered results")
@@ -384,7 +386,7 @@ async def main() -> None:
     # Apply finding-level directory exclusion
     final_kept_findings = []
     for finding in final_output.findings:
-        if finding.file and gitlab_client._is_excluded(finding.file):
+        if finding.file and gitlab_client.is_excluded(finding.file):
             print(f"Skipping finding in excluded directory: {finding.file}")
             continue
         final_kept_findings.append(finding)
@@ -426,17 +428,17 @@ async def main() -> None:
         severity_marker = f"{icon} {f.severity.value}"
 
         for note_info in existing_notes_info:
-            body = note_info["body"]
+            body = str(note_info["body"])
             pos = note_info["position"]
 
             if severity_marker not in body:
                 continue
 
             # 1. Inline note position match
-            if pos:
-                if (pos.get("new_path") == f.file and pos.get("new_line") == f.line) or (
-                    pos.get("old_path") == f.file and pos.get("old_line") == f.line
-                ):
+            if isinstance(pos, dict) and (
+                (pos.get("new_path") == f.file and pos.get("new_line") == f.line)
+                or (pos.get("old_path") == f.file and pos.get("old_line") == f.line)
+            ):
                     return True
 
             # 2. Orphan note match in general MR notes

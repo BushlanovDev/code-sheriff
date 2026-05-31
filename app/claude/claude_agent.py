@@ -16,7 +16,7 @@ class Finding(BaseModel):
     description: str
     exploit_scenario: str
     recommendation: str
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class AnalysisSummary(BaseModel):
@@ -33,56 +33,15 @@ class SecurityReviewOutput(BaseModel):
 
 
 class FilterOutput(BaseModel):
-    confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
-    justification: str = ""
-    keep_finding: bool = True
+    confidence_score: float = Field(ge=0.0, le=1.0)
+    justification: str
+    keep_finding: bool
     exclusion_reason: str | None = None
 
 
 def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient:
-    review_schema = {
-        "type": "object",
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "file": {"type": "string"},
-                        "line": {"type": "number"},
-                        "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
-                        "category": {"type": "string"},
-                        "description": {"type": "string"},
-                        "exploit_scenario": {"type": "string"},
-                        "recommendation": {"type": "string"},
-                        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                    },
-                    "required": [
-                        "file",
-                        "line",
-                        "severity",
-                        "category",
-                        "description",
-                        "exploit_scenario",
-                        "recommendation",
-                        "confidence",
-                    ],
-                },
-            },
-            "analysis_summary": {
-                "type": "object",
-                "properties": {
-                    "files_reviewed": {"type": "number"},
-                    "high_severity": {"type": "number"},
-                    "medium_severity": {"type": "number"},
-                    "low_severity": {"type": "number"},
-                    "review_completed": {"type": "boolean"},
-                },
-                "required": ["files_reviewed", "high_severity", "medium_severity", "low_severity", "review_completed"],
-            },
-        },
-        "required": ["findings", "analysis_summary"],
-    }
+    review_schema = SecurityReviewOutput.model_json_schema()
+    print(review_schema) # TODO
 
     options = ClaudeAgentOptions(
         model=settings.claude_model,
@@ -103,16 +62,8 @@ def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient
 
 
 def get_claude_filter_agent(model: str) -> ClaudeSDKClient:
-    filter_schema = {
-        "type": "object",
-        "properties": {
-            "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-            "justification": {"type": "string"},
-            "keep_finding": {"type": "boolean"},
-            "exclusion_reason": {"type": "string"},
-        },
-        "required": ["confidence_score", "justification", "keep_finding"],
-    }
+    filter_schema = FilterOutput.model_json_schema()
+    print(filter_schema) # TODO
 
     options = ClaudeAgentOptions(
         model=model,

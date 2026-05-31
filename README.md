@@ -153,7 +153,10 @@ uv run ruff format .
 uv run mypy .
 
 # Tests
-uv run --group dev python -m pytes
+uv run python -m pytest
+
+# Coverage
+uv run python -m pytest --cov=app tests
 ```
 
 ## License
