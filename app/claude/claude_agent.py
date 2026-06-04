@@ -41,7 +41,6 @@ class FilterOutput(BaseModel):
 
 def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient:
     review_schema = SecurityReviewOutput.model_json_schema()
-    print(review_schema) # TODO
 
     options = ClaudeAgentOptions(
         model=settings.claude_model,
@@ -63,7 +62,6 @@ def get_claude_code_agent(settings: Settings, repo_dir: Path) -> ClaudeSDKClient
 
 def get_claude_filter_agent(model: str) -> ClaudeSDKClient:
     filter_schema = FilterOutput.model_json_schema()
-    print(filter_schema) # TODO
 
     options = ClaudeAgentOptions(
         model=model,
