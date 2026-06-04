@@ -9,7 +9,7 @@ RUN uv venv /opt/code-sheriff-venv && \
     UV_PROJECT_ENVIRONMENT=/opt/code-sheriff-venv uv sync --frozen --no-dev --no-install-project
 
 COPY app/ app/
-RUN UV_PROJECT_ENVIRONMENT=/opt/code-sheriff-venv uv sync --frozen --no-dev
+RUN UV_PROJECT_ENVIRONMENT=/opt/code-sheriff-venv uv pip install --no-deps .
 
 
 FROM python:3.14-slim
