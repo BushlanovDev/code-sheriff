@@ -16,6 +16,7 @@ from app.config import Settings, get_settings
 from app.constants import (
     CONTEXT_OVERFLOW_PHRASES,
     MAX_PROMPT_SIZE_BYTES,
+    MAX_STRUCTURED_OUTPUT_SUBMITS,
     REVIEW_HEADER,
     SEVERITY_ICONS,
     ExitCode,
@@ -152,6 +153,13 @@ def _format_review_to_markdown(result: SecurityReviewOutput, mr_data: MergeReque
 
 async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -> SecurityReviewOutput | None:
     final_output: SecurityReviewOutput | None = None
+    # Keep whatever the agent handed to StructuredOutput. When the session loops instead of
+    # finishing (see MAX_STRUCTURED_OUTPUT_SUBMITS) the ResultMessage carries no structured
+    # output at all, even though the agent produced a perfectly good one on its first try.
+    submitted_output: dict[str, Any] | None = None
+    submit_count = 0
+    stop_looping = False
+
     async with claude_code_agent:
         await claude_code_agent.query(prompt)
 
@@ -160,10 +168,26 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
                 for block in message.content:
                     if hasattr(block, "name"):
                         block_input = _get_block_input_dict(block)
-                        if block.name == "Task":
+                        if block.name == "StructuredOutput":
+                            submit_count += 1
+                            if block_input:
+                                submitted_output = block_input
+                            print(f"📤 StructuredOutput: submitted (attempt {submit_count})")
+                            if submit_count >= MAX_STRUCTURED_OUTPUT_SUBMITS:
+                                print(
+                                    f"[Warning] Agent re-submitted the result {submit_count} times without the "
+                                    "session finishing. Keeping the payload and stopping so the remaining turns "
+                                    "are not wasted."
+                                )
+                                stop_looping = True
+                                break
+                        elif block.name == "Task":
                             print(f"🤖 Delegating to: {block_input.get('subagent_type', 'unknown')}")
                         else:
                             print(f"📂 {block.name}: {_get_tool_summary(block.name, block_input)}")
+
+                if stop_looping:
+                    break
 
             elif isinstance(message, ResultMessage):
                 if message.subtype == "success" and message.structured_output is not None:
@@ -193,7 +217,16 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
                         raise RuntimeError(result_text)
                     print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
                     print(f"❌ Result: {result_text}")
-                    sys.exit(ExitCode.GENERAL_ERROR)
+                    if submitted_output is None:
+                        sys.exit(ExitCode.GENERAL_ERROR)
+                    print("↩ The agent did submit a result before the session failed; trying to use it.")
+
+    if final_output is None and submitted_output is not None:
+        try:
+            final_output = SecurityReviewOutput.model_validate(submitted_output)
+            print(f"\n✅ Recovered the review from the agent's own StructuredOutput call ({submit_count} submits).")
+        except ValidationError as e:
+            print(f"Failed to parse the recovered structured output: {e}")
 
     return final_output
 
