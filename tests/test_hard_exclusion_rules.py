@@ -1,6 +1,5 @@
 """Tests for HardExclusionRules — regex-based false positive filtering."""
 
-
 from app.findings_filter import HardExclusionRules
 from tests.helpers import make_finding
 

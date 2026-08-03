@@ -54,10 +54,12 @@ class GitLabClient:
 
         self.api_url: str = f"{self.base_url}/api/v4"
         self._session: requests.Session = requests.Session()
-        self._session.headers.update({
-            "PRIVATE-TOKEN": self.token,
-            "Accept": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "PRIVATE-TOKEN": self.token,
+                "Accept": "application/json",
+            }
+        )
 
     def _get_project_id(self, project_id: str) -> str:
         """URL encode the project ID if it's a project path (e.g. namespace/repo)."""
@@ -230,9 +232,7 @@ class GitLabClient:
         return cast(dict[str, Any], response.json())
 
     @_retry_on_rate_limit()
-    def update_merge_request_note(
-        self, project_id: str, mr_iid: int, note_id: int, body: str
-    ) -> dict[str, Any]:
+    def update_merge_request_note(self, project_id: str, mr_iid: int, note_id: int, body: str) -> dict[str, Any]:
         """Update a general note/comment on a Merge Request.
 
         PUT /api/v4/projects/{id}/merge_requests/{mr_iid}/notes/{note_id}

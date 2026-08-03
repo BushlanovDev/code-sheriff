@@ -1,6 +1,5 @@
 """Tests for prompt generation functions."""
 
-
 from app.prompts import get_filtering_prompt, get_security_audit_prompt
 
 # ── get_security_audit_prompt() ─────────────────────────────────
@@ -39,7 +38,10 @@ class TestSecurityAuditPrompt:
     def test_custom_scan_instructions(self):
         custom = "Check for LDAP injection in all LDAP queries"
         prompt = get_security_audit_prompt(
-            self.MR_DATA, self.CHANGED_FILES, self.DIFF_TEXT, custom_scan_instructions=custom,
+            self.MR_DATA,
+            self.CHANGED_FILES,
+            self.DIFF_TEXT,
+            custom_scan_instructions=custom,
         )
         assert custom in prompt
 
@@ -50,7 +52,10 @@ class TestSecurityAuditPrompt:
     def test_changes_stats_included(self):
         stats = {"files_changed": 3, "additions": 50, "deletions": 10}
         prompt = get_security_audit_prompt(
-            self.MR_DATA, self.CHANGED_FILES, self.DIFF_TEXT, changes_stats=stats,
+            self.MR_DATA,
+            self.CHANGED_FILES,
+            self.DIFF_TEXT,
+            changes_stats=stats,
         )
         assert "Files changed: 3" in prompt
         assert "Lines added: 50" in prompt
@@ -84,46 +89,58 @@ class TestFilteringPrompt:
     def test_contains_finding_json(self):
         finding_json = '{"file": "x.py", "description": "SQL injection"}'
         prompt = get_filtering_prompt(
-            mr_info="MR #1", finding_json=finding_json,
-            filtering_section=None, file_content_section="",
+            mr_info="MR #1",
+            finding_json=finding_json,
+            filtering_section=None,
+            file_content_section="",
         )
         assert finding_json in prompt
 
     def test_contains_mr_info(self):
         prompt = get_filtering_prompt(
-            mr_info="MR Context:\n- Title: Fix", finding_json="{}",
-            filtering_section=None, file_content_section="",
+            mr_info="MR Context:\n- Title: Fix",
+            finding_json="{}",
+            filtering_section=None,
+            file_content_section="",
         )
         assert "MR Context" in prompt
 
     def test_custom_filtering_instructions(self):
         custom = "Ignore all XSS findings in this project"
         prompt = get_filtering_prompt(
-            mr_info="", finding_json="{}",
-            filtering_section=custom, file_content_section="",
+            mr_info="",
+            finding_json="{}",
+            filtering_section=custom,
+            file_content_section="",
         )
         assert custom in prompt
 
     def test_default_filtering_when_none(self):
         prompt = get_filtering_prompt(
-            mr_info="", finding_json="{}",
-            filtering_section=None, file_content_section="",
+            mr_info="",
+            finding_json="{}",
+            filtering_section=None,
+            file_content_section="",
         )
         assert "HARD EXCLUSIONS" in prompt
 
     def test_file_content_included(self):
         content = "\n\nFile Content (app.py):\n```\ndef foo(): pass\n```"
         prompt = get_filtering_prompt(
-            mr_info="", finding_json="{}",
-            filtering_section=None, file_content_section=content,
+            mr_info="",
+            finding_json="{}",
+            filtering_section=None,
+            file_content_section=content,
         )
         assert "def foo(): pass" in prompt
 
     def test_confidence_scale_0_to_1(self):
         """Ensure the prompt uses 0.0-1.0 scale, not 1-10."""
         prompt = get_filtering_prompt(
-            mr_info="", finding_json="{}",
-            filtering_section=None, file_content_section="",
+            mr_info="",
+            finding_json="{}",
+            filtering_section=None,
+            file_content_section="",
         )
         assert "0.0" in prompt or "0.0-0.3" in prompt
         assert "1-10" not in prompt

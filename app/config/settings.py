@@ -49,9 +49,9 @@ class Settings(BaseSettings):
     def resolve_gitlab_base_url_from_ci(cls, data: dict) -> dict:
         """Resolve gitlab_base_url from CI_SERVER_URL if not set."""
         if isinstance(data, dict) and ("gitlab_base_url" not in data or data["gitlab_base_url"] is None):
-                ci_server_url = data.get("ci_server_url")
-                if ci_server_url:
-                    data["gitlab_base_url"] = ci_server_url
+            ci_server_url = data.get("ci_server_url")
+            if ci_server_url:
+                data["gitlab_base_url"] = ci_server_url
         return data
 
     @field_validator("exclude_directories", mode="before")

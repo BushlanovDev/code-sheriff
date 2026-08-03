@@ -99,7 +99,7 @@ def test_merge_request_param_from_settings():
         anthropic_api_key="key",
         claude_model="model",
         ci_project_id="123",
-        ci_merge_request_iid="456"
+        ci_merge_request_iid="456",
     )
     pid, iid = _merge_request_param(settings)
     assert pid == "123"

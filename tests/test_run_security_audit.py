@@ -118,6 +118,16 @@ async def test_recovers_after_failed_result_message() -> None:
     assert output.analysis_summary.files_reviewed == 6
 
 
+async def test_does_not_recover_payload_from_a_non_loop_failure() -> None:
+    """A payload captured before a non-loop failure must not be passed off as a finished review."""
+    agent = FakeAgent([read_file(), submit(PAYLOAD), result(subtype="error_during_execution")])
+
+    with pytest.raises(SystemExit) as excinfo:
+        await _run_security_audit(agent, "prompt")  # type: ignore[arg-type]
+
+    assert excinfo.value.code == ExitCode.GENERAL_ERROR
+
+
 async def test_exits_when_failure_and_nothing_was_submitted() -> None:
     """With no payload to fall back on the run still fails loudly."""
     agent = FakeAgent([read_file(), result(subtype="error_during_execution")])

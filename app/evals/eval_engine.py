@@ -120,12 +120,17 @@ class EvaluationEngine:
         try:
             subprocess.run(
                 ["git", "-C", repo_path, "worktree", "prune"],
-                check=False, capture_output=True, timeout=TIMEOUT_SHORT,
+                check=False,
+                capture_output=True,
+                timeout=TIMEOUT_SHORT,
             )
 
             result = subprocess.run(
                 ["git", "-C", repo_path, "worktree", "list", "--porcelain"],
-                capture_output=True, text=True, check=True, timeout=TIMEOUT_SHORT,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=TIMEOUT_SHORT,
             )
 
             worktrees: list[dict[str, Any]] = []
@@ -158,7 +163,9 @@ class EvaluationEngine:
                     try:
                         subprocess.run(
                             ["git", "-C", repo_path, "worktree", "remove", "--force", wt["path"]],
-                            check=False, capture_output=True, timeout=TIMEOUT_SHORT,
+                            check=False,
+                            capture_output=True,
+                            timeout=TIMEOUT_SHORT,
                         )
                         if Path(wt["path"]).exists():
                             shutil.rmtree(wt["path"], ignore_errors=True)
@@ -169,14 +176,19 @@ class EvaluationEngine:
             if branch_pattern:
                 result = subprocess.run(
                     ["git", "-C", repo_path, "branch", "--list"],
-                    capture_output=True, text=True, check=True, timeout=TIMEOUT_SHORT,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=TIMEOUT_SHORT,
                 )
                 for line in result.stdout.strip().split("\n"):
                     branch = line.strip().lstrip("* ")
                     if branch and branch_pattern in branch:
                         subprocess.run(
                             ["git", "-C", repo_path, "branch", "-D", branch],
-                            check=False, capture_output=True, timeout=TIMEOUT_SHORT,
+                            check=False,
+                            capture_output=True,
+                            timeout=TIMEOUT_SHORT,
                         )
                         self.log(f"Deleted branch: {branch}")
 
@@ -214,7 +226,9 @@ class EvaluationEngine:
                 try:
                     subprocess.run(
                         ["git", "clone", "--filter=blob:none", clone_url, base_repo_path],
-                        check=True, capture_output=True, timeout=TIMEOUT_CLONE,
+                        check=True,
+                        capture_output=True,
+                        timeout=TIMEOUT_CLONE,
                     )
                 except subprocess.CalledProcessError as e:
                     error = f"Failed to clone: {e.stderr.decode()}"
@@ -233,20 +247,35 @@ class EvaluationEngine:
                 self.log(f"Fetching MR !{test_case.mr_iid} from {project_id}")
                 subprocess.run(
                     [
-                        "git", "-C", base_repo_path, "fetch", "origin",
+                        "git",
+                        "-C",
+                        base_repo_path,
+                        "fetch",
+                        "origin",
                         f"merge-requests/{test_case.mr_iid}/head:mr-{test_case.mr_iid}",
                     ],
-                    check=True, capture_output=True, timeout=TIMEOUT_FETCH,
+                    check=True,
+                    capture_output=True,
+                    timeout=TIMEOUT_FETCH,
                 )
 
                 # Create worktree
                 self.log(f"Creating worktree at {worktree_path}")
                 subprocess.run(
                     [
-                        "git", "-C", base_repo_path, "worktree", "add",
-                        "-b", eval_branch, worktree_path, f"mr-{test_case.mr_iid}",
+                        "git",
+                        "-C",
+                        base_repo_path,
+                        "worktree",
+                        "add",
+                        "-b",
+                        eval_branch,
+                        worktree_path,
+                        f"mr-{test_case.mr_iid}",
                     ],
-                    check=True, capture_output=True, timeout=TIMEOUT_WORKTREE_CREATE,
+                    check=True,
+                    capture_output=True,
+                    timeout=TIMEOUT_WORKTREE_CREATE,
                 )
                 return True, worktree_path, ""
 
@@ -258,7 +287,9 @@ class EvaluationEngine:
                 with contextlib.suppress(Exception):
                     subprocess.run(
                         ["git", "-C", base_repo_path, "worktree", "remove", "--force", worktree_path],
-                        check=False, capture_output=True, timeout=TIMEOUT_SHORT,
+                        check=False,
+                        capture_output=True,
+                        timeout=TIMEOUT_SHORT,
                     )
                 return False, "", error
 
@@ -273,7 +304,9 @@ class EvaluationEngine:
             try:
                 subprocess.run(
                     ["git", "-C", base_repo_path, "worktree", "remove", "--force", worktree_path],
-                    check=False, capture_output=True, timeout=TIMEOUT_WORKTREE,
+                    check=False,
+                    capture_output=True,
+                    timeout=TIMEOUT_WORKTREE,
                 )
                 if Path(worktree_path).exists():
                     shutil.rmtree(worktree_path, ignore_errors=True)
@@ -302,9 +335,7 @@ class EvaluationEngine:
             )
 
         try:
-            result = asyncio.run(
-                self._run_audit(test_case, worktree_path)
-            )
+            result = asyncio.run(self._run_audit(test_case, worktree_path))
             result.runtime_seconds = time.time() - start_time
             return result
         except Exception as e:
@@ -352,9 +383,7 @@ class EvaluationEngine:
         for change in mr_changes.get("changes", []):
             new_path = change.get("new_path", "")
             old_path = change.get("old_path", "")
-            if (new_path and gitlab_client.is_excluded(new_path)) or (
-                old_path and gitlab_client.is_excluded(old_path)
-            ):
+            if (new_path and gitlab_client.is_excluded(new_path)) or (old_path and gitlab_client.is_excluded(old_path)):
                 continue
             diff = change.get("diff", "")
             if gitlab_client.is_generated(diff):
@@ -373,7 +402,9 @@ class EvaluationEngine:
                     total_del += 1
 
         prompt = get_security_audit_prompt(
-            mr_data, changed_files, mr_diff,
+            mr_data,
+            changed_files,
+            mr_diff,
             changes_stats={"files_changed": len(changed_files), "additions": total_add, "deletions": total_del},
         )
 
@@ -396,15 +427,16 @@ class EvaluationEngine:
                     and message.subtype == "success"
                     and message.structured_output is not None
                 ):
-                        from pydantic import ValidationError
-                        try:
-                            final_output = SecurityReviewOutput.model_validate(message.structured_output)
-                        except ValidationError as e:
-                            self.log(f"Failed to parse output: {e}")
-                        cost = getattr(message, "total_cost_usd", 0.0)
-                        usage = getattr(message, "usage", {})
-                        in_tokens = usage.get("input_tokens", 0)
-                        out_tokens = usage.get("output_tokens", 0)
+                    from pydantic import ValidationError
+
+                    try:
+                        final_output = SecurityReviewOutput.model_validate(message.structured_output)
+                    except ValidationError as e:
+                        self.log(f"Failed to parse output: {e}")
+                    cost = getattr(message, "total_cost_usd", 0.0)
+                    usage = getattr(message, "usage", {})
+                    in_tokens = usage.get("input_tokens", 0)
+                    out_tokens = usage.get("output_tokens", 0)
 
         if not final_output:
             return EvalResult(

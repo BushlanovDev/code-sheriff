@@ -217,7 +217,7 @@ async def _run_security_audit(claude_code_agent: ClaudeSDKClient, prompt: str) -
                         raise RuntimeError(result_text)
                     print(f"\n❌ Review failed: {getattr(message, 'subtype', 'unknown error')}")
                     print(f"❌ Result: {result_text}")
-                    if submitted_output is None:
+                    if message.subtype != "error_max_turns" or submitted_output is None:
                         sys.exit(ExitCode.GENERAL_ERROR)
                     print("↩ The agent did submit a result before the session failed; trying to use it.")
 
@@ -362,7 +362,11 @@ async def main() -> None:
         if is_prompt_too_long:
             print(f"[Warning] Prompt too long ({prompt_size} bytes), retrying without diff...")
             prompt_without_diff = get_security_audit_prompt(
-                mr_data, changed_files, mr_diff, custom_scan_text, include_diff=False,
+                mr_data,
+                changed_files,
+                mr_diff,
+                custom_scan_text,
+                include_diff=False,
                 changes_stats=changes_stats,
             )
             try:
@@ -472,7 +476,7 @@ async def main() -> None:
                 (pos.get("new_path") == f.file and pos.get("new_line") == f.line)
                 or (pos.get("old_path") == f.file and pos.get("old_line") == f.line)
             ):
-                    return True
+                return True
 
             # 2. Orphan note match in general MR notes
             location_str = f"`{f.file}:{f.line}`" if f.line else f"`{f.file}`"
