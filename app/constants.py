@@ -44,6 +44,11 @@ GENERATED_MARKERS = (
 
 MAX_PROMPT_SIZE_BYTES = 1024 * 1024  # 1MB
 
+# The agent sometimes submits a valid result, the tool accepts it, and the session still
+# refuses to finish: a stop hook demands another StructuredOutput call and the loop burns
+# every remaining turn re-submitting the same payload. Stop once it is clearly looping.
+MAX_STRUCTURED_OUTPUT_SUBMITS = 3
+
 CONTEXT_OVERFLOW_PHRASES = (
     "prompt is too long",
     "prompt too long",
